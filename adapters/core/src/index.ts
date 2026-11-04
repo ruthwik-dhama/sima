@@ -11,6 +11,7 @@ import {
   makeTarget,
   normalizeSpace,
   visibleText,
+  removeTextAimedAtAi,
 } from '@sima/page-analyzer';
 
 export interface PageInfo {
@@ -100,7 +101,7 @@ export function analyzePage(
     pageType: restricted ? 'assessment' : page.pageType,
     activity: { id: page.activityId, title: page.activityTitle },
     pagination: page.pagination,
-    instructions: page.instructions,
+    instructions: removeTextAimedAtAi(page.instructions),
     restriction:
       restricted && restriction.status !== 'restricted'
         ? {

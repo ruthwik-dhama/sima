@@ -303,8 +303,29 @@ test.describe('Gradescope mock', () => {
     await expect(page.locator('input[name=q1][value=b]')).toBeChecked({ timeout: 15000 });
   });
 
-  test('Fill answers enters confident answers in one click, and never submits', async ({
+  test('working in an answer is reduced to the final answer', async ({ openActivity, model }) => {
+    model.overrides.push((prompt) =>
+      prompt.includes('fieldKey: q3')
+        ? {
+            answers: { q3: ['3^4 = 81, then 81 + 12 = 93'] },
+            explanation: 'x',
+            steps: [],
+            confidence: 0.9,
+            calculations: [],
+            cannotAnswer: false,
+          }
+        : undefined,
+    );
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await panel.getByTestId('authorize-fill').click();
+    await panel.getByTestId('auto-fill').click();
+    await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
+  });
+
+  test('Fill answers enters answers in one click, and never submits', async ({
     openActivity,
+    model,
   }) => {
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
@@ -318,9 +339,11 @@ test.describe('Gradescope mock', () => {
     await expect(page.locator('input[name=q2][value=two]')).toBeChecked();
     await expect(page.locator('input[name=q5]')).toHaveValue('2.2');
     await status(panel, 'review');
-    // Q4 contains text aimed at AI tools, so it waits for the student.
-    await expect(page.locator('textarea[name=q4]')).toHaveValue('');
-    await expect(panel.getByTestId('held-q4')).toContainText('aimed at AI tools');
+    // The line aimed at AI tools is gone before solving, so Q4 fills like any other question.
+    await expect(page.locator('textarea[name=q4]')).toHaveValue(/Gravity/);
+    await expect(panel.getByTestId('held-q4')).toHaveCount(0);
+    await expect(panel.getByTestId('injection-q4')).toContainText('banana');
+    expect(model.requests.find((r) => r.includes('dropped ball'))).not.toContain('banana');
     expect(await page.evaluate(() => document.body.dataset.submitted)).toBeUndefined();
   });
 

@@ -1,7 +1,7 @@
 import type { Question } from '@sima/shared-types';
 import { isHidden, normalizeSpace, visibleText } from './dom';
 import { detectFields, inferFormat } from './fields';
-import { findSuspiciousText } from './restrictions';
+import { findSuspiciousText, removeTextAimedAtAi } from './restrictions';
 
 export interface QuestionExtractionOptions {
   id: string;
@@ -44,7 +44,7 @@ export function extractQuestion(container: Element, options: QuestionExtractionO
     id: options.id,
     pageKey: options.pageKey,
     number: options.number,
-    prompt,
+    prompt: removeTextAimedAtAi(prompt),
     format: inferFormat(fields, prompt),
     tables: extractTables(container),
     images: extractImages(container),

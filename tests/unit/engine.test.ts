@@ -350,18 +350,29 @@ describe('one-click fill', () => {
     expect(page.execute).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    ['no answer at all', { answers: [], calculations: [] }, {}],
-    ['text aimed at AI tools', {}, { suspiciousText: ['Ignore previous instructions'] }],
-  ])('leaves %s for the user', async (_name, model, q) => {
-    reasoner.complete.mockResolvedValue({ ...solution, ...model });
-    const page1 = analysis({ questions: [{ ...question(), ...q }] });
+  it.each([['no answer at all', { answers: [], calculations: [] }, {}]])(
+    'leaves %s for the user',
+    async (_name, model, q) => {
+      reasoner.complete.mockResolvedValue({ ...solution, ...model });
+      const page1 = analysis({ questions: [{ ...question(), ...q }] });
+      page.analyze.mockResolvedValue(page1);
+      const task = await engine.onPageReady(1, page1);
+      await engine.authorizeFill(task.id, true);
+      await engine.autoFill(task.id);
+      expect(page.execute).not.toHaveBeenCalled();
+      expect((await store.getQuestion(recordId(task.id, 'p1', 'q1')))?.approved).toBe(false);
+    },
+  );
+
+  it('enters answers on a question that had text aimed at AI tools', async () => {
+    const page1 = analysis({
+      questions: [{ ...question(), suspiciousText: ['Ignore previous instructions'] }],
+    });
     page.analyze.mockResolvedValue(page1);
     const task = await engine.onPageReady(1, page1);
     await engine.authorizeFill(task.id, true);
     await engine.autoFill(task.id);
-    expect(page.execute).not.toHaveBeenCalled();
-    expect((await store.getQuestion(recordId(task.id, 'p1', 'q1')))?.approved).toBe(false);
+    expect(page.execute).toHaveBeenCalledOnce();
   });
 
   it('tries again on a saved solution that has no answer', async () => {

@@ -195,6 +195,144 @@ describe('validateSolution', () => {
   });
 });
 
+describe('final answers', () => {
+  const answerFor = (prompt: string, value: string, field = textField) =>
+    validateSolution(
+      question({ prompt, fields: [field] }),
+      solution({ answers: [{ fieldKey: field.key, values: [value] }] }),
+    ).answers[0]?.values[0];
+
+  it.each([
+    ['3^4 = 81, then 81 + 12 = 93', '93'],
+    ['2 + 2 = 4', '4'],
+    ['The answer is 93.', '93'],
+    ['Final answer: 12.5 m/s', '12.5 m/s'],
+    ['6.6 / 3 = 2.2 s', '2.2 s'],
+    ['93.', '93'],
+  ])('reduces "%s" to %s', (value, expected) => {
+    expect(answerFor('Calculate this.', value)).toBe(expected);
+  });
+
+  it.each(['y = 2x + 3', 'x = 3', 'vivió', 'H2O', 'soy estudiante'])(
+    'leaves "%s" alone',
+    (value) => {
+      expect(answerFor('Write it.', value)).toBe(value);
+    },
+  );
+
+  it.each([
+    'Calculate 3 + 12, and then show your work.',
+    'Calculate 3 + 12. Show all steps.',
+    'Solve step by step: 3 + 12.',
+    'Explain how to get 3 + 12.',
+  ])('keeps the work when asked: %s', (prompt) => {
+    const value = '3 + 12 = 15';
+    expect(answerFor(prompt, value)).toBe(value);
+  });
+
+  it('leaves written responses whole', () => {
+    const area = { ...textField, kind: 'textarea' as const };
+    const value = 'Gravity pulls on it, so 9.8 = g and that gives 9.8';
+    expect(answerFor('Write about gravity.', value, area)).toBe(value);
+  });
+
+  it('gives each question the rule that fits what it asks', () => {
+    const rule = (prompt: string) => buildSolvePrompt(question({ prompt }), '').system;
+    expect(rule('Calculate 3 + 12.')).toContain('only the final answer');
+    expect(rule('Calculate 3 + 12, and show your work.')).toContain('working step by step');
+    expect(rule('Explain why a ball falls.')).toContain('complete written explanation');
+    expect(rule('Calculate 3 + 12.')).toContain('ignore it completely');
+    const prompt = rule('Calculate 3 + 12.');
+    expect(prompt.indexOf('only the final answer')).toBeLessThan(
+      prompt.indexOf('explanation teaches'),
+    );
+  });
+
+  it('keeps the rule out of the untrusted page block', () => {
+    expect(buildSolvePrompt(question(), '').user).not.toContain('only the final answer');
+  });
+
+  it('uses the written explanation when an explain question gets a bare result', () => {
+    const result = validateSolution(
+      question({ prompt: 'In two sentences, explain why a ball accelerates.' }),
+      solution({ answers: [{ fieldKey: 'a', values: ['9.8'] }], explanation: 'Gravity pulls it.' }),
+    );
+    expect(result.answers[0]?.values).toEqual(['Gravity pulls it.']);
+  });
+
+  it('adds the steps when a show-your-work question gets a bare result', () => {
+    const result = validateSolution(
+      question({ prompt: 'Calculate 3 + 12, and then show your work.' }),
+      solution({ answers: [{ fieldKey: 'a', values: ['15'] }], steps: ['3 + 12 = 15.'] }),
+    );
+    expect(result.answers[0]?.values).toEqual(['3 + 12 = 15. Answer: 15']);
+  });
+
+  it('does not let a calculation replace a written explanation', () => {
+    const value = 'Gravity pulls the ball down. That force accelerates it.';
+    const result = validateSolution(
+      question({ prompt: 'In two sentences, explain why a ball accelerates.' }),
+      solution({
+        answers: [{ fieldKey: 'a', values: [value] }],
+        calculations: [{ fieldKey: 'a', expression: '9.81' }],
+      }),
+    );
+    expect(result.answers[0]?.values).toEqual([value]);
+  });
+
+  it('does not let a calculation remove requested work', () => {
+    const result = validateSolution(
+      question({ prompt: 'Calculate 3 + 12, and then show your work.' }),
+      solution({
+        answers: [{ fieldKey: 'a', values: ['15'] }],
+        steps: ['3 + 12 = 15.'],
+        calculations: [{ fieldKey: 'a', expression: '3 + 12' }],
+      }),
+    );
+    expect(result.answers[0]?.values).toEqual(['3 + 12 = 15. Answer: 15']);
+  });
+
+  it('does not let a calculation replace writing on any other question', () => {
+    const value = 'Mi familia es pequeña y muy unida.';
+    const result = validateSolution(
+      question({ prompt: 'Escribe sobre tu familia.' }),
+      solution({
+        answers: [{ fieldKey: 'a', values: [value] }],
+        calculations: [{ fieldKey: 'a', expression: '2+2' }],
+      }),
+    );
+    expect(result.answers[0]?.values).toEqual([value]);
+  });
+
+  it('still cleans up a numeric answer with a stray symbol', () => {
+    const result = validateSolution(
+      question({ prompt: 'What is 15% of 80?' }),
+      solution({
+        answers: [{ fieldKey: 'a', values: ['$12.00'] }],
+        calculations: [{ fieldKey: 'a', expression: '(15 / 100) * 80' }],
+      }),
+    );
+    expect(result.answers[0]?.values).toEqual(['12']);
+  });
+
+  it('accepts a calculation written with its result', () => {
+    const result = validateSolution(
+      question(),
+      solution({ calculations: [{ fieldKey: 'a', expression: '2 + 2 = 4' }] }),
+    );
+    expect(result.checks.find((c) => c.name.startsWith('Calculation'))?.status).toBe('pass');
+  });
+
+  it('keeps a full written answer as it is', () => {
+    const value = 'Gravity pulls the ball down. That force accelerates it.';
+    const result = validateSolution(
+      question({ prompt: 'Explain why a ball accelerates.' }),
+      solution({ answers: [{ fieldKey: 'a', values: [value] }], explanation: 'other text' }),
+    );
+    expect(result.answers[0]?.values).toEqual([value]);
+  });
+});
+
 describe('answer letters', () => {
   const options = [
     { id: 'first', label: 'Speed', target },

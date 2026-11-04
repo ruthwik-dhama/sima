@@ -6,6 +6,7 @@ import {
   type Question,
   type ValidatedSolution,
 } from '@sima/shared-types';
+import { asksForExplanation, asksForWork } from './prompt';
 import {
   countSignificantFigures,
   evaluateExpression,
@@ -89,6 +90,33 @@ function choicesFromReasoning(field: AnswerField, solution: ModelSolution): stri
   return resolved.every((r) => r !== null) ? (resolved as string[]) : [];
 }
 
+const BARE_NUMBER = /^[-+−]?[\d,]*\.?\d+(?:[eE][-+]?\d+)?(?:\s*[a-zA-Z°%µ][a-zA-Z0-9°%µ/^·*-]*)?$/;
+
+function isWrittenAnswer(value: string): boolean {
+  return parseNumericAnswer(value) === null && value.trim().split(/\s+/).length > 3;
+}
+
+function isBareResult(value: string): boolean {
+  return BARE_NUMBER.test(value) || !/\s/.test(value);
+}
+
+/**
+ * Reduces a model's answer to its result: "3^4 = 81, then 81 + 12 = 93" becomes "93". Only a chain
+ * ending in a number counts, so an answer like "y = 2x + 3" stays whole.
+ */
+function toFinalAnswer(value: string): string {
+  const text = value.trim().replace(/\.$/, '');
+  const stated = text.match(
+    /\b(?:final answer|the answer|answer|result)\s*(?:is|:|=)\s*(.+)$/i,
+  )?.[1];
+  const candidate = stated?.trim() ?? text;
+  if (BARE_NUMBER.test(candidate)) return candidate;
+  const parts = candidate.split('=');
+  const last = parts[parts.length - 1]?.trim() ?? '';
+  const hasWorking = parts.length > 1 && /\d/.test(parts[0] ?? '');
+  return hasWorking && BARE_NUMBER.test(last) ? last : stated ? candidate : value;
+}
+
 /**
  * Checks a parsed model answer against the question it answers, and corrects what arithmetic can
  * settle. Anything naming a field or option the page lacks is dropped here, so it can't reach
@@ -129,9 +157,13 @@ export function validateSolution(question: Question, solution: ModelSolution): V
       answers.push({ fieldKey: field.key, values: known });
       continue;
     }
+    const finalOnly = field.kind !== 'textarea' && !asksForWork(question.prompt);
     answers.push({
       fieldKey: field.key,
-      values: answer.values.map((v) => v.normalize('NFC')).filter((v) => v.trim() !== ''),
+      values: answer.values
+        .map((v) => v.normalize('NFC'))
+        .map((v) => (finalOnly ? toFinalAnswer(v) : v))
+        .filter((v) => v.trim() !== ''),
     });
   }
 
@@ -153,10 +185,28 @@ export function validateSolution(question: Question, solution: ModelSolution): V
     }
   }
 
+  // A question asking for work or an explanation shouldn't get a bare result, and the model has
+  // already written both, so use what it wrote.
+  if (asksForWork(question.prompt)) {
+    for (const entry of answers) {
+      const field = question.fields.find((f) => f.key === entry.fieldKey);
+      const value = entry.values[0]?.trim();
+      if (!field || field.options.length > 0 || !value || !isBareResult(value)) continue;
+      if (asksForExplanation(question.prompt)) {
+        if (solution.explanation.trim()) entry.values = [solution.explanation.trim()];
+      } else if (solution.steps.length > 0) {
+        entry.values = [`${solution.steps.join(' ')} Answer: ${value}`];
+      }
+    }
+  }
+
   const computedValues = new Map<string, number>();
   for (const calc of solution.calculations) {
     const field = question.fields.find((f) => f.key === calc.fieldKey);
     if (!field || field.options.length > 0) continue;
+    // Correction is for numeric results. It must not replace a written answer with a number.
+    const written = answers.find((a) => a.fieldKey === calc.fieldKey)?.values[0] ?? '';
+    if (asksForWork(question.prompt) || isWrittenAnswer(written)) continue;
     let entry = answers.find((a) => a.fieldKey === calc.fieldKey);
     if (!entry) {
       entry = { fieldKey: field.key, values: [] };
@@ -165,7 +215,7 @@ export function validateSolution(question: Question, solution: ModelSolution): V
     const name = `Calculation for ${field.label || field.key}`;
     let computed: number;
     try {
-      computed = evaluateExpression(calc.expression);
+      computed = evaluateExpression(calc.expression.split('=')[0] ?? '');
     } catch {
       checks.push({
         name,

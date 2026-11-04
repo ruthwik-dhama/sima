@@ -71,6 +71,8 @@ describe('Gradescope mock', () => {
     expect(q4.prompt).not.toMatch(/API key/);
     expect(q4.prompt).not.toMatch(/submit button/);
     expect(q4.suspiciousText.join(' ')).toMatch(/banana/);
+    expect(q4.prompt).not.toMatch(/banana/);
+    expect(q4.prompt).toContain('explain why a dropped ball accelerates');
   });
 
   it('never offers a submit control as navigation', async () => {

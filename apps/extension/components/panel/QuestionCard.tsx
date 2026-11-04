@@ -238,8 +238,8 @@ export function QuestionCard({
           <Alert data-testid={`injection-${question.id}`}>
             <TriangleAlert className="size-4" />
             <AlertDescription>
-              This question contains text aimed at AI tools. Sima treats it as page content and
-              doesn't follow it, but check the answer yourself: "{question.suspiciousText[0]}"
+              Sima ignored this line, which is aimed at AI tools: "{question.suspiciousText[0]}"
+              Instructors sometimes add lines like this to spot AI use.
             </AlertDescription>
           </Alert>
         )}

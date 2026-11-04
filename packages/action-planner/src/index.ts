@@ -10,12 +10,11 @@ export const MAPPING_CONFIDENCE_THRESHOLD = 0.8;
 /**
  * Why one-click fill leaves a question for the user, or null if it may be entered. Confidence and
  * failed checks don't hold anything back, since the panel shows them and the user decides how much
- * to trust them. Text trying to steer the model does, because the confidence can't reflect that.
+ * to trust them. Nor does text aimed at AI tools, which is removed before the model reads it.
  */
 export function autoFillHold(record: QuestionRecord): string | null {
-  const { solution, question } = record;
+  const { solution } = record;
   if (!solution) return record.solveError ? 'Sima could not solve this' : 'Not solved yet';
-  if (question.suspiciousText.length > 0) return 'This question contains text aimed at AI tools';
   if (!solution.answers.some((a) => a.values.length > 0)) return 'The model gave no answer';
   return null;
 }

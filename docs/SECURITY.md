@@ -4,21 +4,21 @@
 
 Webpages are untrusted, including course content that an instructor or another party could have edited. Model output is also untrusted, because page content can influence it. The trusted parties are the user and the extension's own pages.
 
-| Threat                                 | Mitigation                                                                                                          |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Hidden text instructs the model        | Extraction reads rendered text only, excluding hidden, zero-size, transparent and off-screen content                |
-| Visible text instructs the model       | The prompt fences page text as data, delimiter look-alikes are stripped, and suspicious text is flagged to the user |
-| Injected model output tries to act     | Output is limited to values for fields and options on the page. It can't name selectors, actions or URLs            |
-| Model output is malformed              | Zod rejects it, and it's shown as an error                                                                          |
-| Model output contains markup           | React renders it as text. Nothing uses `dangerouslySetInnerHTML`                                                    |
-| Selector now points at another element | Element fingerprint check before every action                                                                       |
-| Submit control presented as "Next"     | Label and type are checked at analysis and again at execution                                                       |
-| Page reads the API key                 | Keys stay in `storage.local`, locked to trusted contexts, and are used only in the worker                           |
-| Compromised content script             | Settings and key commands are rejected unless sent from an extension page                                           |
-| Key leaks through errors or URLs       | Keys travel in headers only, and are redacted from provider errors                                                  |
-| A page detects Sima                    | No web-accessible resources. The floating UI's host element is still visible to the page                            |
+| Threat                                 | Mitigation                                                                                                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hidden text instructs the model        | Extraction reads rendered text only, excluding hidden, zero-size, transparent and off-screen content                                                                   |
+| Visible text instructs the model       | The prompt fences page text as data, delimiter look-alikes are stripped, and sentences aimed at AI tools are removed before the model reads them and shown to the user |
+| Injected model output tries to act     | Output is limited to values for fields and options on the page. It can't name selectors, actions or URLs                                                               |
+| Model output is malformed              | Zod rejects it, and it's shown as an error                                                                                                                             |
+| Model output contains markup           | React renders it as text. Nothing uses `dangerouslySetInnerHTML`                                                                                                       |
+| Selector now points at another element | Element fingerprint check before every action                                                                                                                          |
+| Submit control presented as "Next"     | Label and type are checked at analysis and again at execution                                                                                                          |
+| Page reads the API key                 | Keys stay in `storage.local`, locked to trusted contexts, and are used only in the worker                                                                              |
+| Compromised content script             | Settings and key commands are rejected unless sent from an extension page                                                                                              |
+| Key leaks through errors or URLs       | Keys travel in headers only, and are redacted from provider errors                                                                                                     |
+| A page detects Sima                    | No web-accessible resources. The floating UI's host element is still visible to the page                                                                               |
 
-Injection defenses reduce the risk but can't eliminate it: visible text can still sway an answer. That's why every answer is reviewed before entry, and the plan can do nothing worse than fill an approved value into a field on that page.
+Injection defenses reduce the risk but can't eliminate it: visible text can still sway an answer. Sentence-level detection misses phrasing it doesn't recognize, and Fill answers enters answers without a review step. The worst a successful injection can do is put a wrong value in a field on that page, which the user can see and change before submitting.
 
 ## Academic integrity
 

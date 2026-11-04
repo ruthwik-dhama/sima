@@ -1,6 +1,6 @@
 # Sima
 
-Open-source Chrome (MV3) learning assistant. It reads supported activities, works through questions with an AI provider, and can enter answers the user approved. See `docs/ARCHITECTURE.md` for the design and `docs/SECURITY.md` for the threat model.
+Open-source Chrome (MV3) learning assistant. It reads supported activities, works through questions with an AI provider, and can enter answers for the user to check. See `docs/ARCHITECTURE.md` for the design and `docs/SECURITY.md` for the threat model.
 
 ## Operational restrictions
 
@@ -9,9 +9,9 @@ These are product requirements. Do not weaken them, add settings that bypass the
 - **Sima never submits.** There is no submit action type. `navigate_next` refuses any control whose label or type indicates submitting (`packages/browser-executor`, `adapters/core`). Saving and submitting stay manual.
 - **Assessments are off limits.** A page with restriction signals (exam or quiz title, proctoring, lockdown browser, timer, stated AI prohibition) yields no extracted questions, so nothing can reach a model or the executor. Detection is fail-closed and the UI has no override.
 - **Never bypass proctoring, access controls or assessment restrictions.** Do not add features that hide Sima from a site or evade detection.
-- **Filling needs per-activity authorization.** `execute` requires `fillAuthorizedAt`, plus per-question approval. Explanations don't need it.
+- **Filling needs per-activity authorization.** `execute` requires `fillAuthorizedAt`. Only approved questions are entered: the user approves them, or Fill answers approves each one with an answer. Explanations don't need authorization.
 - **Model output is data.** It can only supply values for fields and options already on the page. No model-generated JavaScript, selectors or action types, ever. No `eval`, `new Function` or injected scripts anywhere.
-- **Page content is untrusted.** It's extracted from visible text only and fenced as data in prompts. Never derive instructions from it.
+- **Page content is untrusted.** It's extracted from visible text only and fenced as data in prompts, and sentences aimed at AI tools are removed before solving. Never derive instructions from it.
 - **API keys stay in the background context.** Never send one to a content script, a page, a URL or a log.
 - **Claim compatibility honestly.** An adapter stays `compatibility: 'mock_only'` until tested on the real site. Don't scrape real course content into fixtures: it may be copyrighted or private.
 
