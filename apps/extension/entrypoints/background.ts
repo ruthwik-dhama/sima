@@ -174,7 +174,7 @@ export default defineBackground(() => {
         return undefined;
       case 'DELETE_API_KEYS':
         return deleteApiKeys();
-      case 'OPEN_SIDE_PANEL':
+      case 'OPEN_POPUP':
       case 'DISMISS_FLOATING':
         throw new Error('Handled from the content script');
     }
@@ -217,9 +217,9 @@ export default defineBackground(() => {
       // Content scripts run alongside untrusted pages, so they get a deliberately small surface.
       const tabId = sender.tab?.id;
       if (tabId === undefined) return false;
-      if (type === 'OPEN_SIDE_PANEL') {
+      if (type === 'OPEN_POPUP') {
         // Must be called synchronously to keep the user gesture from the click.
-        return respond(chrome.sidePanel.open({ tabId }), sendResponse);
+        return respond(chrome.action.openPopup(), sendResponse);
       }
       if (type === 'DISMISS_FLOATING') {
         return respond(chrome.storage.session.set({ [`dismissed:${tabId}`]: true }), sendResponse);
@@ -237,7 +237,6 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => void engine.detachTab(tabId).catch(() => undefined));
 
   void lockStorageToExtensionPages();
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
   // A status still in flight here means the previous worker died partway through a step.
   void engine.recover().catch(() => undefined);
 });

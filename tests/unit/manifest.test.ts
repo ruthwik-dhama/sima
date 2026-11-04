@@ -18,7 +18,14 @@ describe.runIf(existsSync(path))('production manifest', () => {
   it('keeps provider and local-model access optional', () => {
     expect(manifest.optional_host_permissions).toContain('https://api.openai.com/*');
     expect(manifest.host_permissions).not.toContain('https://api.openai.com/*');
-    expect(manifest.permissions.sort()).toEqual(['sidePanel', 'storage']);
+    expect(manifest.permissions.sort()).toEqual(['storage']);
+  });
+
+  it('declares a Sima icon at every size Chrome uses', () => {
+    for (const size of ['16', '32', '48', '128']) {
+      expect(manifest.icons[size]).toBeTruthy();
+      expect(existsSync(`apps/extension/.output/chrome-mv3/${manifest.icons[size]}`)).toBe(true);
+    }
   });
 
   it('exposes no web-accessible resources', () => {

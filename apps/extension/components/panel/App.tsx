@@ -1,17 +1,16 @@
 import { useEffect } from 'react';
-import { ArrowLeft, CircleAlert, Settings, Sparkles } from 'lucide-react';
+import { CircleAlert, Settings, Sparkles } from 'lucide-react';
 import { PROVIDER_ENDPOINTS } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { SettingsPage } from '@/components/SettingsPage';
+import { openSettings } from '@/services/open-settings';
 import { useTaskStore } from '@/stores/task-store';
 import { Controls, Disclosure, Restricted } from './Sections';
 import { QuestionCard } from './QuestionCard';
 
 export function App() {
-  const { view, error, setTab, refresh, dismissError, settingsOpen, setSettingsOpen } =
-    useTaskStore();
+  const { view, error, setTab, refresh, dismissError } = useTaskStore();
 
   useEffect(() => {
     const fromQuery = Number(new URLSearchParams(location.search).get('tabId'));
@@ -21,9 +20,6 @@ export function App() {
       void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
         if (tab?.id !== undefined) void setTab(tab.id);
       });
-      const onActivated = (info: { tabId: number }) => void setTab(info.tabId);
-      chrome.tabs.onActivated.addListener(onActivated);
-      return () => chrome.tabs.onActivated.removeListener(onActivated);
     }
   }, [setTab]);
 
@@ -38,11 +34,12 @@ export function App() {
   const task = view?.task;
   const analysis = view?.analysis;
   const progress = view?.progress;
+  const restricted = task?.status === 'blocked_restricted';
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex max-h-[600px] w-[380px] flex-col bg-background">
       <header
-        className="sticky top-0 z-10 flex flex-col gap-3 bg-background/90 px-4 pt-3 pb-3 backdrop-blur"
+        className="flex shrink-0 flex-col gap-3 border-b p-4"
         data-testid="task-status"
         data-status={task?.status}
         data-page={analysis?.pagination.index}
@@ -53,18 +50,18 @@ export function App() {
           <Button
             variant="ghost"
             size="icon"
-            className="ml-auto size-8 rounded-full text-muted-foreground"
-            aria-label={settingsOpen ? 'Back to activity' : 'Open settings'}
-            data-testid="settings-toggle"
-            onClick={() => setSettingsOpen(!settingsOpen)}
+            className="-my-1 ml-auto size-8 rounded-full text-muted-foreground"
+            aria-label="Open settings"
+            data-testid="open-settings-gear"
+            onClick={openSettings}
           >
-            {settingsOpen ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}
+            <Settings className="size-4" />
           </Button>
         </div>
         {task && (
           <div className="flex min-w-0 flex-col gap-2">
             <h1
-              className="truncate text-base leading-snug font-semibold"
+              className="truncate text-sm leading-snug font-semibold"
               data-testid="activity-title"
             >
               {task.activityTitle}
@@ -79,72 +76,63 @@ export function App() {
                   className="shrink-0 text-xs text-muted-foreground"
                   data-testid="progress-text"
                 >
-                  {progress.answered} of {progress.total} answered
+                  {progress.answered} of {progress.total}
                 </span>
               </div>
             )}
           </div>
         )}
+        {task && view && !restricted && <Controls key={task.id} view={view} task={task} />}
       </header>
 
-      {settingsOpen ? (
-        <SettingsPage />
-      ) : (
-        <main className="flex flex-col gap-3 px-4 pt-1 pb-6">
-          {error && (
-            <Alert variant="destructive" data-testid="panel-error">
-              <CircleAlert className="size-4" />
-              <AlertDescription className="flex items-start justify-between gap-2">
-                <span>{error}</span>
-                <Button variant="ghost" size="sm" className="h-6" onClick={dismissError}>
-                  Dismiss
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-          {task?.error && (
-            <Alert variant="destructive">
-              <AlertDescription>{task.error}</AlertDescription>
-            </Alert>
-          )}
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        {(error || task?.error || analysis?.warnings.length || (task && view)) && (
+          <div className="flex flex-col gap-2 empty:hidden [&:has(>*)]:p-3">
+            {error && (
+              <Alert variant="destructive" data-testid="panel-error">
+                <CircleAlert className="size-4" />
+                <AlertDescription className="flex items-start justify-between gap-2">
+                  <span>{error}</span>
+                  <Button variant="ghost" size="sm" className="h-6" onClick={dismissError}>
+                    Dismiss
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+            {task?.error && (
+              <Alert variant="destructive">
+                <AlertDescription>{task.error}</AlertDescription>
+              </Alert>
+            )}
+            {analysis?.warnings.map((warning) => (
+              <Alert key={warning} data-testid="analysis-warning">
+                <AlertDescription>{warning}</AlertDescription>
+              </Alert>
+            ))}
+            {restricted && analysis && <Restricted analysis={analysis} />}
+            {!restricted && <Disclosure providers={PROVIDER_ENDPOINTS} />}
+          </div>
+        )}
 
-          {!task && (
-            <div className="py-8 text-center text-muted-foreground" data-testid="empty-state">
-              <p className="font-medium text-foreground">No supported activity on this tab</p>
-              <p>
-                Open an activity on Gradescope, VHL Central or WebAssign, and Sima will read it
-                here.
-              </p>
-            </div>
-          )}
+        {!task && (
+          <div className="px-6 py-8 text-center text-muted-foreground" data-testid="empty-state">
+            <p className="font-medium text-foreground">No supported activity on this tab</p>
+            <p>Open an activity on Gradescope, VHL Central or WebAssign to use Sima.</p>
+          </div>
+        )}
 
-          {analysis?.warnings.map((warning) => (
-            <Alert key={warning} data-testid="analysis-warning">
-              <AlertDescription>{warning}</AlertDescription>
-            </Alert>
+        {task &&
+          view &&
+          !restricted &&
+          view.questions.map((record) => (
+            <QuestionCard
+              key={record.id}
+              record={record}
+              actions={view.actions}
+              blockers={view.plan.blockers}
+            />
           ))}
-
-          {task?.status === 'blocked_restricted' && analysis ? (
-            <Restricted analysis={analysis} />
-          ) : (
-            task &&
-            view && (
-              <>
-                <Disclosure providers={PROVIDER_ENDPOINTS} />
-                <Controls key={task.id} view={view} task={task} />
-                {view.questions.map((record) => (
-                  <QuestionCard
-                    key={record.id}
-                    record={record}
-                    actions={view.actions}
-                    blockers={view.plan.blockers}
-                  />
-                ))}
-              </>
-            )
-          )}
-        </main>
-      )}
+      </main>
     </div>
   );
 }

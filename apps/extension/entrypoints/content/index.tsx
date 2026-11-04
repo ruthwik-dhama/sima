@@ -119,7 +119,7 @@ function run(ctx: Parameters<typeof createShadowRootUi>[0], adapter: PlatformAda
           subscribe={(setter) => {
             setFloating = setter;
           }}
-          onOpen={() => void sendCommand({ type: 'OPEN_SIDE_PANEL' }).catch(() => undefined)}
+          onOpen={() => void sendCommand({ type: 'OPEN_POPUP' }).catch(() => undefined)}
           onDismiss={() => void sendCommand({ type: 'DISMISS_FLOATING' }).catch(() => undefined)}
         />
       );

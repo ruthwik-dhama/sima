@@ -141,7 +141,7 @@ export const test = base.extend<Fixtures>({
         return tab?.id as number;
       }, page.url());
       const panel = await context.newPage();
-      await panel.goto(`chrome-extension://${extensionId}/sidepanel.html?tabId=${tabId}`);
+      await panel.goto(`chrome-extension://${extensionId}/popup.html?tabId=${tabId}`);
       await page.bringToFront();
       return { page, panel, tabId };
     });
@@ -166,4 +166,11 @@ export async function onPage(panel: Page, index: number) {
   await expect(panel.getByTestId('task-status')).toHaveAttribute('data-page', String(index), {
     timeout: 15000,
   });
+}
+
+/** Rows stay collapsed unless they need attention. */
+export async function openRow(panel: Page, questionId: string) {
+  const row = panel.getByTestId(`question-${questionId}`);
+  if ((await row.getAttribute('open')) === null)
+    await panel.getByTestId(`row-${questionId}`).click();
 }

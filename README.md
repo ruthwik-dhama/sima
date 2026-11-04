@@ -14,7 +14,7 @@ You're responsible for following your course's academic integrity policy. If you
 
 ## Setup
 
-You need Node.js 22 or newer and Chrome 116 or newer.
+You need Node.js 22 or newer and Chrome 127 or newer.
 
 ```bash
 corepack enable
@@ -27,7 +27,7 @@ Then load it in Chrome:
 
 1. Go to `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and choose `apps/extension/.output/chrome-mv3`.
-3. Click the Sima icon, open the settings gear, and set up a provider. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+3. Click the Sima icon in the toolbar, click the gear, and set up a provider. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
 ## Try it on the mock platforms
 

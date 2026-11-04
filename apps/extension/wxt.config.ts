@@ -12,7 +12,7 @@ export default defineConfig({
   manifest: {
     name: 'Sima',
     description: 'Understand and work through learning activities, with you in control.',
-    permissions: ['sidePanel', 'storage'],
+    permissions: ['storage'],
     host_permissions: [
       'https://*.gradescope.com/*',
       'https://*.vhlcentral.com/*',

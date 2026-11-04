@@ -3,7 +3,7 @@ import { ActionResultSchema, BrowserActionSchema } from './actions';
 import { ElementTargetSchema, PageAnalysisSchema } from './page';
 import { ProviderIdSchema, SettingsSchema } from './settings';
 
-/** Messages from the side panel, options page or floating UI to the background. */
+/** Messages from the dropdown, options page or floating UI to the background. */
 export const UiCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('GET_VIEW'), tabId: z.number() }),
   z.object({ type: z.literal('ANALYZE'), tabId: z.number() }),
@@ -46,7 +46,7 @@ export const UiCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ACKNOWLEDGE_PROVIDER'), provider: ProviderIdSchema }),
   z.object({ type: z.literal('DELETE_TASK_DATA') }),
   z.object({ type: z.literal('DELETE_API_KEYS') }),
-  z.object({ type: z.literal('OPEN_SIDE_PANEL') }),
+  z.object({ type: z.literal('OPEN_POPUP') }),
   z.object({ type: z.literal('DISMISS_FLOATING') }),
 ]);
 export type UiCommand = z.infer<typeof UiCommandSchema>;

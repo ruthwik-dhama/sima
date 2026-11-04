@@ -34,7 +34,6 @@ Sima enforces what it can see, and stays off on anything that looks like an asse
 
 | Permission                           | Why                                                |
 | ------------------------------------ | -------------------------------------------------- |
-| `sidePanel`                          | The main workspace                                 |
 | `storage`                            | Preferences and keys                               |
 | Host access to the three platforms   | Reading and filling activities                     |
 | Optional host access to one provider | Requested when you test that provider's connection |

@@ -3,7 +3,7 @@
 ## Pipeline
 
 ```
-content script                     background worker                    side panel
+content script                     background worker                    dropdown
 --------------                     -----------------                    ----------
 adapter.detectPage                 TaskEngine
 adapter.extractQuestions  --PAGE_READY-->  persist analysis  --STATE_CHANGED-->  render
@@ -53,8 +53,8 @@ The stages are kept apart on purpose. Reasoning produces values for known field 
 
 ## Extension surfaces
 
-- **Floating assistant:** React in a Shadow DOM, with bundled CSS and a px-based theme so host pages can't affect it.
-- **Side panel:** main workspace, using a Zustand store over background commands.
-- **Settings:** options page. Provider host permissions are requested here, when the user tests a connection.
+- **Floating pill:** React in a Shadow DOM, with bundled CSS and a px-based theme so host pages can't affect it. Clicking it opens the dropdown (Chrome 127 or newer).
+- **Toolbar dropdown:** main workspace, using a Zustand store over background commands. It closes when the user clicks away, so all state lives in the background and a running fill continues without it.
+- **Settings:** options page in its own tab, because a permission prompt would close the dropdown. Provider host permissions are requested here, when the user tests a connection.
 
 Dexie is opened only from the background. A content script's IndexedDB would belong to the website's origin.

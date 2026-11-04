@@ -2,8 +2,7 @@
 :root,
 :host {
   --radius: 0.875rem;
-  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 4px 16px rgb(16 24 40 / 0.06);
-  --background: #f6f7f9;
+  --background: #ffffff;
   --foreground: #1f1f1f;
   --card: #ffffff;
   --card-foreground: #1f1f1f;
@@ -29,10 +28,9 @@
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
-    --background: #17181a;
+    --background: #202124;
     --foreground: #e3e3e3;
-    --card: #222427;
+    --card: #202124;
     --card-foreground: #e3e3e3;
     --popover: #2a2c2f;
     --popover-foreground: #e3e3e3;

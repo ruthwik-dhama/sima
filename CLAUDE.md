@@ -18,7 +18,7 @@ These are product requirements. Do not weaken them, add settings that bypass the
 ## Layout
 
 ```
-apps/extension/        WXT app: background, content script, side panel, settings
+apps/extension/        WXT app: background, content script, toolbar dropdown, settings
 packages/shared-types  Zod schemas: page model, actions, tasks, settings, messages
 packages/page-analyzer Visibility, field detection and mapping, restriction and injection detection
 packages/reasoning-engine  Prompts, solution validation, deterministic math checks

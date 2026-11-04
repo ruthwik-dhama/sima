@@ -6,8 +6,6 @@ interface TaskStore {
   tabId: number | null;
   view: TaskView | null;
   error: string | null;
-  settingsOpen: boolean;
-  setSettingsOpen: (open: boolean) => void;
   setTab: (tabId: number) => Promise<void>;
   refresh: () => Promise<void>;
   /** Sends a command, then refreshes. Failures surface in the panel, not the console. */
@@ -19,8 +17,6 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   tabId: null,
   view: null,
   error: null,
-  settingsOpen: false,
-  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   async setTab(tabId) {
     set({ tabId, view: null, error: null });
     await sendCommand({ type: 'ANALYZE', tabId }).catch(() => undefined);

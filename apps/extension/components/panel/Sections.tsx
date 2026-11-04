@@ -4,6 +4,7 @@ import type { PageAnalysis, ProviderId, Settings, Task, TaskView } from '@sima/s
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { sendCommand } from '@/services/messaging';
+import { openSettings } from '@/services/open-settings';
 import { useTaskStore } from '@/stores/task-store';
 
 export function Restricted({ analysis }: { analysis: PageAnalysis }) {
@@ -38,9 +39,8 @@ export function Disclosure({
     );
   // Reload after an error too, since the fix is often a change on the Settings page.
   const panelError = useTaskStore((s) => s.error);
-  const setSettingsOpen = useTaskStore((s) => s.setSettingsOpen);
   useEffect(() => void load(), [panelError]);
-  // Settings open in another tab, so pick up changes made there without a reload.
+  // Settings open in their own tab, so pick up changes made there.
   useEffect(() => {
     const onChanged = () => void load();
     chrome.storage.onChanged.addListener(onChanged);
@@ -55,12 +55,7 @@ export function Disclosure({
         <AlertTitle>Choose an AI model to get started</AlertTitle>
         <AlertDescription>
           <p>Sima needs a model for {provider.name} before it can work through questions.</p>
-          <Button
-            size="sm"
-            className="mt-2"
-            data-testid="open-settings"
-            onClick={() => setSettingsOpen(true)}
-          >
+          <Button size="sm" className="mt-2" data-testid="open-settings" onClick={openSettings}>
             Open settings
           </Button>
         </AlertDescription>
@@ -107,16 +102,18 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
     setRunning(null);
   };
 
+  // Reopening the dropdown mid-run loses which button started it, so stay neutral then.
   const filling =
-    task.status === 'executing' || (task.status === 'reasoning' && running !== 'explain');
+    task.status === 'executing' || (task.status === 'reasoning' && running === 'fill');
   const explaining = task.status === 'reasoning' && running === 'explain';
+  const working = task.status === 'reasoning' && running === null;
   const iconClass = 'animate-spin';
 
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2" data-testid="controls">
         <Button
-          className="h-10 rounded-xl"
+          className="h-9 rounded-lg"
           data-testid="auto-fill"
           disabled={busy}
           onClick={() => {
@@ -124,11 +121,11 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
             else void start('fill');
           }}
         >
-          {filling ? <LoaderCircle className={iconClass} /> : <Zap />}
-          {filling ? 'Filling…' : 'Fill answers'}
+          {filling || working ? <LoaderCircle className={iconClass} /> : <Zap />}
+          {working ? 'Working…' : filling ? 'Filling…' : 'Fill answers'}
         </Button>
         <Button
-          className="h-10 rounded-xl bg-card"
+          className="h-9 rounded-lg"
           variant="outline"
           data-testid="solve-all"
           disabled={busy || !unsolved}
@@ -142,7 +139,7 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
         <div
           role="alertdialog"
           aria-labelledby="fill-permission-title"
-          className="sima-card flex flex-col gap-3 rounded-xl bg-card p-4"
+          className="flex flex-col gap-2.5 rounded-lg bg-muted p-3"
           data-testid="fill-permission"
         >
           <div>
