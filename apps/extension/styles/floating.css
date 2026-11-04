@@ -1,0 +1,26 @@
+@import 'tailwindcss';
+@import './tokens.css';
+@import './theme.css';
+
+/* Pixel values: rem would follow the host page's root font size, and some sites change it. */
+@theme {
+  --spacing: 4px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+}
+
+/* Tailwind's shadow utilities rely on @property, which isn't registered from inside a shadow tree. */
+.sima-float {
+  /* Set here, not on :host, because the shadow root's reset applies all: initial to the host. */
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.2),
+    0 4px 12px rgb(0 0 0 / 0.14);
+}

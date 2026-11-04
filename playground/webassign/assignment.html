@@ -1,0 +1,35 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Ch. 2 Homework | Mock</title><link rel="stylesheet" href="/shared/mock.css"></head><body>
+<div class="mock-banner">Local mock for Sima development. Not affiliated with WebAssign or Cengage.</div>
+<main id="root"></main>
+<script>
+const q = Number(new URLSearchParams(location.search).get('q') ?? 1);
+const QUESTIONS = {
+1: `<div class="card" data-wa-question="1"><p>A cart travels 150 m in 12.0 s at constant speed. Calculate its speed to three significant figures.</p>
+    <table><tr><th>Distance</th><th>Time</th></tr><tr><td>150 m</td><td>12.0 s</td></tr></table>
+    <label>Speed <input type="text" name="speed"></label>
+    <label>Units <select name="speed_unit"><option value="">--Select--</option><option value="m/s">m/s</option><option value="km/h">km/h</option><option value="m">m</option></select></label></div>`,
+2: `<div class="card" data-wa-question="1"><p>If the net force on an object is zero, its acceleration is:</p>
+    <label><input type="radio" name="accel" value="0"> zero</label><label><input type="radio" name="accel" value="1"> constant and nonzero</label><label><input type="radio" name="accel" value="2"> increasing</label></div>
+    <div class="card" data-wa-question="2"><p>Compute the kinetic energy, in joules, of a 2 kg mass moving at 3 m/s.</p>
+    <div id="controlled"></div></div>`,
+3: `<div class="card" data-wa-question="1"><p>Enter the two roots of x<sup>2</sup> - 5x + 6 = 0.</p>
+    <input type="text" name="blank_a"> and <input type="text" name="blank_b"></div>`,
+};
+const root = document.getElementById('root');
+root.innerHTML = `<div data-wa-assignment="ch2-homework" data-category="homework" data-current="${q}" data-total="3">
+  <h1>Ch. 2 Homework</h1><p data-wa-instructions>Enter answers with appropriate units. Question ${q} of 3.</p>${QUESTIONS[q]}
+  <div class="actions">${q < 3 ? `<button type="button" data-wa-next>Next Question</button>` : ''}<button type="submit" id="submit-all">Submit Assignment</button></div></div>`;
+// Framework-like controlled input: state changes only through input events, and each tick
+// writes state back. A plain value assignment with no event is wiped out here.
+const slot = document.getElementById('controlled');
+if (slot) {
+  let state = '';
+  const input = document.createElement('input');
+  input.type = 'text'; input.name = 'ke'; input.setAttribute('aria-label', 'Kinetic energy (J)');
+  input.addEventListener('input', () => { state = input.value; });
+  slot.append(input);
+  setInterval(() => { if (input.value !== state) input.value = state; }, 20);
+}
+root.querySelector('[data-wa-next]')?.addEventListener('click', () => { location.search = `?q=${q + 1}`; });
+document.getElementById('submit-all').addEventListener('click', () => { document.body.dataset.submitted = 'true'; });
+</script></body></html>

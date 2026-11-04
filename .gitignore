@@ -1,0 +1,10 @@
+node_modules
+.output
+.wxt
+dist
+coverage
+test-results
+playwright-report
+*.log
+.DS_Store
+.output-e2e

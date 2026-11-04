@@ -1,0 +1,48 @@
+# Security and privacy
+
+## Threat model
+
+Webpages are untrusted, including course content that an instructor or another party could have edited. Model output is also untrusted, because page content can influence it. The trusted parties are the user and the extension's own pages.
+
+| Threat                                 | Mitigation                                                                                                          |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Hidden text instructs the model        | Extraction reads rendered text only, excluding hidden, zero-size, transparent and off-screen content                |
+| Visible text instructs the model       | The prompt fences page text as data, delimiter look-alikes are stripped, and suspicious text is flagged to the user |
+| Injected model output tries to act     | Output is limited to values for fields and options on the page. It can't name selectors, actions or URLs            |
+| Model output is malformed              | Zod rejects it, and it's shown as an error                                                                          |
+| Model output contains markup           | React renders it as text. Nothing uses `dangerouslySetInnerHTML`                                                    |
+| Selector now points at another element | Element fingerprint check before every action                                                                       |
+| Submit control presented as "Next"     | Label and type are checked at analysis and again at execution                                                       |
+| Page reads the API key                 | Keys stay in `storage.local`, locked to trusted contexts, and are used only in the worker                           |
+| Compromised content script             | Settings and key commands are rejected unless sent from an extension page                                           |
+| Key leaks through errors or URLs       | Keys travel in headers only, and are redacted from provider errors                                                  |
+| A page detects Sima                    | No web-accessible resources. The floating UI's host element is still visible to the page                            |
+
+Injection defenses reduce the risk but can't eliminate it: visible text can still sway an answer. That's why every answer is reviewed before entry, and the plan can do nothing worse than fill an approved value into a field on that page.
+
+## Academic integrity
+
+Sima enforces what it can see, and stays off on anything that looks like an assessment. It can't know a course's full policy, so it asks the user to confirm for each activity before filling. A missed detection doesn't make use permitted. Sima has no mechanisms for hiding from a site, and none should be added.
+
+## Data handling
+
+- **Stored locally:** extracted questions, responses, explanations and action logs in IndexedDB; preferences and keys in `chrome.storage.local`.
+- **Sent externally:** only when the user asks Sima to work through a question. The text, tables, image descriptions and field labels for that question go to the chosen provider, after a disclosure the user acknowledges. There's no Sima backend and no analytics.
+- **Deleting:** Settings has separate controls for saved activities and API keys. Removing the extension deletes everything.
+
+## Permissions
+
+| Permission                           | Why                                                |
+| ------------------------------------ | -------------------------------------------------- |
+| `sidePanel`                          | The main workspace                                 |
+| `storage`                            | Preferences and keys                               |
+| Host access to the three platforms   | Reading and filling activities                     |
+| Optional host access to one provider | Requested when you test that provider's connection |
+
+## Known gaps
+
+- API keys aren't encrypted at rest.
+- Restriction detection is heuristic and only sees the current page.
+- Page content is treated as trusted by the user when they review it: Sima shows extracted text, not a guarantee of what it means.
+
+Report vulnerabilities privately to the maintainers rather than in a public issue.

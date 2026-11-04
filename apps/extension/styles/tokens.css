@@ -1,0 +1,53 @@
+/* Design tokens shared by extension pages and the shadow-DOM floating assistant. */
+:root,
+:host {
+  --radius: 0.5rem;
+  --background: #ffffff;
+  --foreground: #1f1f1f;
+  --card: #ffffff;
+  --card-foreground: #1f1f1f;
+  --popover: #ffffff;
+  --popover-foreground: #1f1f1f;
+  --primary: #0b57d0;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f4f9;
+  --secondary-foreground: #1f1f1f;
+  --muted: #f0f4f9;
+  --muted-foreground: #5f6368;
+  --accent: #e8f0fe;
+  --accent-foreground: #0b57d0;
+  --destructive: #b3261e;
+  --warning: #8a5a00;
+  --warning-surface: #fff4d6;
+  --success: #146c2e;
+  --border: #dadce0;
+  --input: #c4c7c5;
+  --ring: #0b57d0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  :host {
+    --background: #1f1f1f;
+    --foreground: #e3e3e3;
+    --card: #282a2c;
+    --card-foreground: #e3e3e3;
+    --popover: #282a2c;
+    --popover-foreground: #e3e3e3;
+    --primary: #a8c7fa;
+    --primary-foreground: #062e6f;
+    --secondary: #333537;
+    --secondary-foreground: #e3e3e3;
+    --muted: #333537;
+    --muted-foreground: #a8abaf;
+    --accent: #004a77;
+    --accent-foreground: #c2e7ff;
+    --destructive: #f2b8b5;
+    --warning: #f5cf7a;
+    --warning-surface: #3d2f05;
+    --success: #6dd58c;
+    --border: #444746;
+    --input: #5f6368;
+    --ring: #a8c7fa;
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@sima/browser-executor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@sima/shared-types": "workspace:*",
+    "@sima/page-analyzer": "workspace:*"
+  }
+}
