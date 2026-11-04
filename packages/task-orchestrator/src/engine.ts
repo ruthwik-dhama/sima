@@ -1,14 +1,7 @@
-import { buildNavigateAction, buildPlan } from '@sima/action-planner';
-import {
-  buildFollowUpPrompt,
-  buildSolvePrompt,
-  FOLLOW_UP_JSON_SCHEMA,
-  SOLUTION_JSON_SCHEMA,
-  validateSolution,
-} from '@sima/reasoning-engine';
+import { autoFillHold, buildNavigateAction, buildPlan } from '@sima/action-planner';
+import { buildFollowUpPrompt, FOLLOW_UP_JSON_SCHEMA, solveQuestion } from '@sima/reasoning-engine';
 import {
   FollowUpResponseSchema,
-  ModelSolutionSchema,
   type ActionFailure,
   type ActionRecord,
   type ActionResult,
@@ -344,13 +337,9 @@ export class TaskEngine {
 
   private async solveOne(record: QuestionRecord, instructions: string): Promise<void> {
     try {
-      const raw = await this.reasoner.complete(
-        buildSolvePrompt(record.question, instructions),
-        SOLUTION_JSON_SCHEMA,
-        'submit_solution',
+      const solution = await solveQuestion(record.question, instructions, (prompt, schema, name) =>
+        this.reasoner.complete(prompt, schema, name),
       );
-      const parsed = ModelSolutionSchema.parse(raw);
-      const solution = validateSolution(record.question, parsed);
       const responses = Object.fromEntries(solution.answers.map((a) => [a.fieldKey, a.values]));
       // A new answer needs fresh approval. Anything else the user did meanwhile is kept.
       await this.updateRecord(record.id, (latest) => ({
@@ -365,6 +354,29 @@ export class TaskEngine {
       await this.updateRecord(record.id, (latest) => ({ ...latest, solveError }));
     }
     this.onChange(record.taskId);
+  }
+
+  /**
+   * One click: solve what's unsolved, approve what passed every check, and enter it. Questions
+   * that didn't pass stay unapproved for the user. Still needs the activity's authorization.
+   */
+  async autoFill(taskId: string): Promise<void> {
+    const task = await this.require(taskId);
+    if (task.status === 'blocked_restricted') {
+      throw new Error('This activity is restricted, so Sima will not fill it.');
+    }
+    if (!task.fillAuthorizedAt) {
+      throw new Error('Confirm that this activity permits automated assistance before filling.');
+    }
+    await this.solve(taskId);
+    if ((await this.require(taskId)).status !== 'review') return;
+    for (const record of await this.store.getQuestions(taskId, task.currentPageKey)) {
+      if (autoFillHold(record) === null) {
+        await this.updateRecord(record.id, (latest) => ({ ...latest, approved: true }));
+      }
+    }
+    this.onChange(taskId);
+    await this.execute(taskId);
   }
 
   async followUp(id: string, question: string): Promise<void> {

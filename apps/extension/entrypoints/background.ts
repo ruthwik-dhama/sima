@@ -129,6 +129,9 @@ export default defineBackground(() => {
       case 'EXECUTE':
         await assertPlatformEnabled(command.taskId);
         return engine.execute(command.taskId);
+      case 'AUTO_FILL':
+        await assertPlatformEnabled(command.taskId);
+        return engine.autoFill(command.taskId);
       case 'NAVIGATE_NEXT':
         await assertPlatformEnabled(command.taskId);
         return engine.navigateNext(command.taskId);

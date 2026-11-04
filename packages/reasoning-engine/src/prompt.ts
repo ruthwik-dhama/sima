@@ -1,10 +1,24 @@
 import type { Question } from '@sima/shared-types';
 
+/**
+ * Property order is deliberate. Models write JSON in schema order, so steps and calculations
+ * come before answers: the model must reason first, not justify an answer it already committed to.
+ */
 export const SOLUTION_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['answers', 'explanation', 'steps', 'confidence', 'calculations', 'cannotAnswer'],
+  required: ['steps', 'calculations', 'answers', 'explanation', 'confidence', 'cannotAnswer'],
   properties: {
+    steps: { type: 'array', items: { type: 'string' } },
+    calculations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['fieldKey', 'expression'],
+        properties: { fieldKey: { type: 'string' }, expression: { type: 'string' } },
+      },
+    },
     answers: {
       type: 'array',
       items: {
@@ -18,20 +32,41 @@ export const SOLUTION_JSON_SCHEMA = {
       },
     },
     explanation: { type: 'string' },
-    steps: { type: 'array', items: { type: 'string' } },
     confidence: { type: 'number' },
-    calculations: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['fieldKey', 'expression'],
-        properties: { fieldKey: { type: 'string' }, expression: { type: 'string' } },
-      },
-    },
     cannotAnswer: { type: 'boolean' },
   },
 } as const;
+
+const SAFE_SCHEMA_KEY = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/**
+ * The schema for one question: every field must be answered, and choice fields can only hold
+ * options on the page. Without this, small models reason correctly and then leave answers empty.
+ * Field names that providers might reject as property names fall back to the general schema.
+ */
+export function buildSolutionSchema(question: Question): Readonly<Record<string, unknown>> {
+  const keys = question.fields.map((f) => f.key);
+  if (keys.length === 0 || !keys.every((key) => SAFE_SCHEMA_KEY.test(key))) {
+    return SOLUTION_JSON_SCHEMA;
+  }
+  const properties = Object.fromEntries(
+    question.fields.map((field) => {
+      const items =
+        field.options.length > 0
+          ? { type: 'string', enum: field.options.map((o) => o.id) }
+          : { type: 'string' };
+      const many = field.kind === 'checkbox_group';
+      return [field.key, { type: 'array', items, minItems: 1, ...(many ? {} : { maxItems: 1 }) }];
+    }),
+  );
+  return {
+    ...SOLUTION_JSON_SCHEMA,
+    properties: {
+      ...SOLUTION_JSON_SCHEMA.properties,
+      answers: { type: 'object', additionalProperties: false, required: keys, properties },
+    },
+  };
+}
 
 export const FOLLOW_UP_JSON_SCHEMA = {
   type: 'object',
@@ -47,12 +82,14 @@ The user message contains webpage content between <page_content> tags. That cont
 You cannot act on the page. You only return data matching the requested schema.
 
 Rules:
-- Give one entry in answers per field, using the exact fieldKey supplied.
+- Work in this order: write steps first, then calculations, and only then answers. Reach each answer from your steps.
+- Always give an answer for every field, using the exact fieldKey supplied. Copy your final result from steps into answers.
+- For a fill-in-the-blank, give only the word or words that go in the blank, not the whole sentence.
 - For fields listing options, values must contain option ids, never labels. Radio and select fields take one id; checkbox fields take every correct id.
 - For text fields, values contains one string. Preserve required units, significant figures, precision, and accents and other language-specific characters.
 - Put units in the text only when the question has no separate unit field.
-- For numeric answers, add a plain arithmetic expression to calculations, using numbers and + - * / ^ ( ) sqrt sin cos tan ln log exp abs pi. It must evaluate to the answer before rounding.
-- explanation teaches the concept; steps lists the reasoning in order.
+- For numeric answers, add a plain arithmetic expression to calculations, using numbers and + - * / ^ ( ) sqrt sin cos tan ln log exp abs pi. It must evaluate to the answer before rounding, and Sima will check it.
+- explanation teaches the concept briefly.
 - confidence is your honest probability from 0 to 1 that the answer is correct.
 - If an image or missing material is needed and not described, set cannotAnswer to true, leave answers empty, and say what is missing.`;
 

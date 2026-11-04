@@ -249,6 +249,8 @@ export function createOllamaProvider(config: ProviderConfig): ModelProvider {
           model: req.model,
           stream: false,
           format: req.schema,
+          // Sampling variety only costs accuracy on questions with one right answer.
+          options: { temperature: 0 },
           messages: [
             { role: 'system', content: req.system },
             { role: 'user', content: req.user },

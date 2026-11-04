@@ -12,7 +12,7 @@ import { loadMock } from '../helpers';
 
 const PORT = 5199;
 const base = `http://127.0.0.1:${PORT}`;
-let server: Server;
+let server: Pick<Server, 'close'>;
 
 beforeAll(async () => {
   server = await startPlayground(PORT);

@@ -1,106 +1,179 @@
-import type { CheckResult, ModelSolution, Question, ValidatedSolution } from '@sima/shared-types';
+import type {
+  AnswerField,
+  CheckResult,
+  ModelSolution,
+  Question,
+  ValidatedSolution,
+} from '@sima/shared-types';
 import {
   countSignificantFigures,
   evaluateExpression,
+  formatLike,
   numbersAgree,
   parseNumericAnswer,
+  replaceNumber,
+  toSignificantFigures,
 } from './math';
 
 const FAIL_CAP = 0.35;
 const ABSTAIN_CAP = 0.1;
+/** Below the auto-fill bar: the model and its own calculation disagreed, so a person should look. */
+const CORRECTED_CAP = 0.6;
+
+const WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six'];
+const PLACE_NAMES: Record<string, number> = { tenth: 1, hundredth: 2, thousandth: 3 };
+
+function wordToNumber(word: string): number {
+  return /\d/.test(word) ? Number(word) : WORDS.indexOf(word.toLowerCase());
+}
+
+function normalizeChoice(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^\s*\(?[a-z0-9]\s*[).:]\s+/, '')
+    .replace(/[\s ]+/g, ' ')
+    .trim();
+}
+
+/** Models often name a choice by its label despite instructions. Map it, or report no match. */
+function resolveChoice(field: AnswerField, value: string): string | null {
+  const exact = field.options.find((o) => o.id === value);
+  if (exact) return exact.id;
+  const wanted = value.trim().toLowerCase();
+  const byId = field.options.find((o) => o.id.toLowerCase() === wanted);
+  if (byId) return byId.id;
+  const normalized = normalizeChoice(value);
+  const byLabel = field.options.filter((o) => normalizeChoice(o.label) === normalized);
+  return byLabel.length === 1 ? (byLabel[0]?.id ?? null) : null;
+}
 
 /**
- * Checks a parsed model answer against the question it answers. Anything naming a field or
- * option that the page doesn't have is dropped here, before it can reach the action planner.
+ * Checks a parsed model answer against the question it answers, and corrects what arithmetic can
+ * settle. Anything naming a field or option the page lacks is dropped here, so it can't reach
+ * the action planner.
  */
 export function validateSolution(question: Question, solution: ModelSolution): ValidatedSolution {
   const checks: CheckResult[] = [];
   const answers: ModelSolution['answers'] = [];
+  let corrected = false;
 
   for (const answer of solution.answers) {
     const field = question.fields.find((f) => f.key === answer.fieldKey);
     if (!field) {
       checks.push({
-        name: 'field exists',
+        name: 'Field is on the page',
         status: 'fail',
         detail: `Dropped unknown field "${answer.fieldKey}"`,
       });
       continue;
     }
     if (field.options.length > 0) {
-      const known = answer.values.filter((v) => field.options.some((o) => o.id === v));
-      if (known.length !== answer.values.length) {
-        checks.push({
-          name: 'Choice is on the page',
-          status: 'fail',
-          detail: `An answer for ${field.key} named an option the page doesn't have`,
-        });
-      } else {
-        checks.push({
-          name: 'Choice is on the page',
-          status: 'pass',
-          detail: field.label || 'matches an option',
-        });
-      }
+      const resolved = answer.values.map((v) => resolveChoice(field, v));
+      const known = [...new Set(resolved.filter((v): v is string => v !== null))];
+      const allKnown = resolved.every((v) => v !== null);
+      checks.push(
+        allKnown
+          ? {
+              name: 'Choice is on the page',
+              status: 'pass',
+              detail: field.label || 'matches an option',
+            }
+          : {
+              name: 'Choice is on the page',
+              status: 'fail',
+              detail: `An answer for ${field.key} named an option the page doesn't have`,
+            },
+      );
       answers.push({ fieldKey: field.key, values: known });
       continue;
     }
-    answers.push({ fieldKey: field.key, values: answer.values.map((v) => v.normalize('NFC')) });
+    answers.push({
+      fieldKey: field.key,
+      values: answer.values.map((v) => v.normalize('NFC')).filter((v) => v.trim() !== ''),
+    });
   }
 
+  const computedValues = new Map<string, number>();
   for (const calc of solution.calculations) {
-    const answer = answers.find((a) => a.fieldKey === calc.fieldKey)?.values[0];
-    const name = `calculation ${calc.fieldKey}`;
-    if (answer === undefined || parseNumericAnswer(answer) === null) {
-      checks.push({ name, status: 'not_checked', detail: 'No numeric answer to compare' });
+    const field = question.fields.find((f) => f.key === calc.fieldKey);
+    if (!field || field.options.length > 0) continue;
+    let entry = answers.find((a) => a.fieldKey === calc.fieldKey);
+    if (!entry) {
+      entry = { fieldKey: field.key, values: [] };
+      answers.push(entry);
+    }
+    const name = `Calculation for ${field.label || field.key}`;
+    let computed: number;
+    try {
+      computed = evaluateExpression(calc.expression);
+    } catch {
+      checks.push({
+        name,
+        status: 'not_checked',
+        detail: `Could not evaluate ${calc.expression}`,
+      });
       continue;
     }
-    try {
-      const computed = evaluateExpression(calc.expression);
-      checks.push(
-        numbersAgree(answer, computed)
-          ? { name, status: 'pass', detail: `${calc.expression} = ${computed}` }
-          : {
-              name,
-              status: 'fail',
-              detail: `${calc.expression} = ${computed}, but the answer says ${answer}`,
-            },
-      );
-    } catch {
-      checks.push({ name, status: 'not_checked', detail: `Could not evaluate ${calc.expression}` });
+    computedValues.set(field.key, computed);
+    const stated = entry.values[0] ?? '';
+    if (stated === '') {
+      // The model did the work but left the answer blank, so use the calculation's result.
+      entry.values = [String(Number(computed.toPrecision(10)))];
+      checks.push({ name, status: 'pass', detail: `${calc.expression} = ${computed}` });
+      continue;
     }
+    if (numbersAgree(stated, computed)) {
+      checks.push({ name, status: 'pass', detail: `${calc.expression} = ${computed}` });
+      continue;
+    }
+    // Arithmetic is the one thing Sima can settle itself, so the evaluated result wins.
+    const fixed = replaceNumber(stated, formatLike(stated, computed));
+    entry.values = [fixed];
+    corrected = true;
+    checks.push({
+      name,
+      status: 'pass',
+      detail: `Corrected: the model said "${stated}", but ${calc.expression} = ${computed}`,
+    });
   }
 
   const sigFigs = question.prompt.match(
     /\b(\d|one|two|three|four|five|six)\s+sig(?:nificant)?\.?\s*(?:fig(?:ure)?s?|digits)\b/i,
   )?.[1];
-  if (sigFigs) {
-    const words = ['', 'one', 'two', 'three', 'four', 'five', 'six'];
-    const wanted = /\d/.test(sigFigs) ? Number(sigFigs) : words.indexOf(sigFigs.toLowerCase());
-    for (const answer of answers) {
-      const field = question.fields.find((f) => f.key === answer.fieldKey);
-      const value = answer.values[0];
-      if (
-        !field ||
-        field.options.length > 0 ||
-        value === undefined ||
-        parseNumericAnswer(value) === null
-      )
-        continue;
-      const count = countSignificantFigures(value);
-      checks.push(
-        count === wanted
-          ? {
-              name: `significant figures ${field.key}`,
-              status: 'pass',
-              detail: `${value} has ${wanted}`,
-            }
-          : {
-              name: `significant figures ${field.key}`,
-              status: 'fail',
-              detail: `${value} has ${count}, wanted ${wanted}`,
-            },
-      );
+  const decimalWord = question.prompt.match(
+    /\b(\d|one|two|three|four|five|six)\s+decimal\s+places?\b/i,
+  )?.[1];
+  const placeName = question.prompt.match(/\bnearest\s+(tenth|hundredth|thousandth)\b/i)?.[1];
+  const decimals = decimalWord
+    ? wordToNumber(decimalWord)
+    : placeName
+      ? PLACE_NAMES[placeName.toLowerCase()]
+      : undefined;
+
+  for (const entry of answers) {
+    const field = question.fields.find((f) => f.key === entry.fieldKey);
+    const value = entry.values[0];
+    if (!field || field.options.length > 0 || value === undefined) continue;
+    const parsed = parseNumericAnswer(value);
+    if (parsed === null) continue;
+    const exact = computedValues.get(field.key) ?? parsed;
+    if (sigFigs) {
+      const wanted = wordToNumber(sigFigs);
+      if (countSignificantFigures(value) !== wanted) {
+        entry.values = [replaceNumber(value, toSignificantFigures(exact, wanted))];
+      }
+      checks.push({
+        name: `Significant figures for ${field.label || field.key}`,
+        status: 'pass',
+        detail: `${entry.values[0]} has ${wanted}`,
+      });
+    } else if (decimals !== undefined) {
+      entry.values = [replaceNumber(value, exact.toFixed(decimals))];
+      checks.push({
+        name: `Decimal places for ${field.label || field.key}`,
+        status: 'pass',
+        detail: `${entry.values[0]} has ${decimals}`,
+      });
     }
   }
 
@@ -108,19 +181,21 @@ export function validateSolution(question: Question, solution: ModelSolution): V
   const missing = question.fields.filter((f) => !answered.has(f.key));
   if (missing.length > 0 && !solution.cannotAnswer) {
     checks.push({
-      name: 'all fields answered',
+      name: 'All fields answered',
       status: 'fail',
       detail: `No answer for ${missing.map((f) => f.key).join(', ')}`,
     });
   }
 
   let adjustedConfidence = solution.confidence;
-  if (checks.some((c) => c.status === 'fail'))
+  if (corrected) adjustedConfidence = Math.min(adjustedConfidence, CORRECTED_CAP);
+  if (checks.some((c) => c.status === 'fail')) {
     adjustedConfidence = Math.min(adjustedConfidence, FAIL_CAP);
+  }
   if (solution.cannotAnswer) adjustedConfidence = Math.min(adjustedConfidence, ABSTAIN_CAP);
   if (question.images.some((image) => !image.alt)) {
     checks.push({
-      name: 'images described',
+      name: 'Images described',
       status: 'not_checked',
       detail: 'An image has no description, and the model did not see it',
     });

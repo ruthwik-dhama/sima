@@ -23,6 +23,7 @@ export const UiCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('CONFIRM_FIELD'), recordId: z.string(), fieldKey: z.string() }),
   z.object({ type: z.literal('ALLOW_OVERWRITE'), recordId: z.string(), fieldKey: z.string() }),
   z.object({ type: z.literal('EXECUTE'), taskId: z.string() }),
+  z.object({ type: z.literal('AUTO_FILL'), taskId: z.string() }),
   z.object({ type: z.literal('NAVIGATE_NEXT'), taskId: z.string() }),
   z.object({ type: z.literal('PAUSE'), taskId: z.string() }),
   z.object({ type: z.literal('RESUME'), taskId: z.string() }),

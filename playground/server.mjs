@@ -20,7 +20,16 @@ export function startPlayground(port = 5199) {
       res.writeHead(404).end('Not found');
     }
   });
-  return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    server.once('error', async (error) => {
+      // Reuse a playground that's already running, so tests can run alongside `pnpm playground`.
+      if (error.code !== 'EADDRINUSE') return reject(error);
+      const running = await fetch(`http://127.0.0.1:${port}/shared/mock.css`).catch(() => null);
+      if (running?.ok) resolve({ close: (done) => done?.() });
+      else reject(error);
+    });
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

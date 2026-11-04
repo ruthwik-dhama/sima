@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CircleCheck, CircleX, ImageOff, TriangleAlert } from 'lucide-react';
+import { autoFillHold } from '@sima/action-planner';
 import type { ActionRecord, AnswerField, PlanBlocker, QuestionRecord } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -181,7 +182,6 @@ export function QuestionCard({
   const { question, solution } = record;
   const [followUp, setFollowUp] = useState('');
   const confidence = solution ? Math.round(solution.adjustedConfidence * 100) : null;
-  const failedChecks = solution?.checks.filter((c) => c.status === 'fail') ?? [];
 
   return (
     <Card className="gap-2 py-3" data-testid={`question-${question.id}`}>
@@ -270,11 +270,6 @@ export function QuestionCard({
             )}
           </details>
         )}
-        {failedChecks.length > 0 && (
-          <p className="text-xs font-medium text-destructive">
-            A check failed. Don't rely on this answer without working it through yourself.
-          </p>
-        )}
         {record.followUps.map((item) => (
           <div key={item.at} className="text-xs" data-testid="follow-up-entry">
             <p className="font-medium">{item.question}</p>
@@ -307,6 +302,12 @@ export function QuestionCard({
               />
               Approve this response
             </label>
+            {solution && !record.approved && autoFillHold(record) && (
+              <p className="text-xs text-warning" data-testid={`held-${question.id}`}>
+                Fill answers skips this one: {autoFillHold(record)}. Check it, then approve it to
+                enter it.
+              </p>
+            )}
             <form
               className="flex gap-1.5"
               onSubmit={(event) => {

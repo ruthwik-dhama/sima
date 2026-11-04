@@ -111,3 +111,21 @@ export function numbersAgree(answer: string, computed: number): boolean {
   const tolerance = Math.max(0.5 * 10 ** -decimals, Math.abs(computed) * 1e-9);
   return Math.abs(parsed - computed) <= tolerance * (1 + 1e-9);
 }
+
+const NUMERIC_PREFIX = /^\s*[-+−]?\d*\.?\d+(?:[eE][-+]?\d+)?/;
+
+/** Swaps the number at the start of an answer, keeping anything after it such as a unit. */
+export function replaceNumber(answer: string, value: string): string {
+  return NUMERIC_PREFIX.test(answer) ? answer.replace(NUMERIC_PREFIX, value) : value;
+}
+
+/** Shows a computed value at the precision the stated answer used. */
+export function formatLike(answer: string, computed: number): string {
+  const decimals = answer.match(NUMERIC_PREFIX)?.[0].match(/\.(\d+)/)?.[1]?.length ?? 0;
+  return decimals > 0 ? computed.toFixed(decimals) : String(Number(computed.toPrecision(10)));
+}
+
+export function toSignificantFigures(value: number, figures: number): string {
+  const text = value.toPrecision(figures);
+  return text.includes('e') ? String(Number(text)) : text;
+}

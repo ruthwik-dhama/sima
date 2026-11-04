@@ -224,7 +224,10 @@ test.describe('Gradescope mock', () => {
     await expect(page.locator('input[name=q1]:checked')).toHaveCount(0);
   });
 
-  test('a failing check caps confidence and warns', async ({ openActivity, model }) => {
+  test('wrong arithmetic gets corrected from its calculation, and flagged', async ({
+    openActivity,
+    model,
+  }) => {
     model.overrides.push((prompt) =>
       prompt.includes('fieldKey: q3')
         ? {
@@ -240,8 +243,31 @@ test.describe('Gradescope mock', () => {
     const { panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
     await panel.getByTestId('solve-q3').click();
-    await expect(panel.getByTestId('confidence-q3')).toContainText('35%', { timeout: 15000 });
-    await expect(panel.getByTestId('checks-q3').locator('[data-check="fail"]')).toContainText('93');
+    await expect(panel.getByTestId('confidence-q3')).toContainText('60%', { timeout: 15000 });
+    await expect(panel.getByTestId('response-q3')).toHaveValue('93');
+    await expect(panel.getByTestId('checks-q3')).toContainText('Corrected');
+    await expect(panel.getByTestId('held-q3')).toHaveCount(0);
+  });
+
+  test('Fill answers enters confident answers in one click, and never submits', async ({
+    openActivity,
+  }) => {
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await expect(panel.getByTestId('auto-fill')).toBeDisabled();
+    await panel.getByTestId('authorize-fill').click();
+    await expect(panel.getByTestId('auto-fill')).toBeEnabled();
+    await panel.getByTestId('auto-fill').click();
+
+    await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
+    await expect(page.locator('input[name=q1][value=b]')).toBeChecked();
+    await expect(page.locator('input[name=q2][value=two]')).toBeChecked();
+    await expect(page.locator('input[name=q5]')).toHaveValue('2.2');
+    await status(panel, 'review');
+    // Q4 contains text aimed at AI tools, so it waits for the student.
+    await expect(page.locator('textarea[name=q4]')).toHaveValue('');
+    await expect(panel.getByTestId('held-q4')).toContainText('aimed at AI tools');
+    expect(await page.evaluate(() => document.body.dataset.submitted)).toBeUndefined();
   });
 
   test('does not replace an answer the student already typed without permission', async ({
@@ -465,6 +491,39 @@ test('turning a platform off stops Sima acting on it', async ({
   await expect(panel.getByTestId('panel-error')).toContainText('turned off');
   expect(model.requests).toEqual([]);
   void page;
+});
+
+test('the panel leads a new user to settings, and updates once a model is set', async ({
+  context,
+  extensionId,
+  worker,
+}) => {
+  const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
+  expect(manifest.options_ui?.open_in_tab).toBe(true);
+
+  const page = await context.newPage();
+  await page.goto(`${MOCK}/vhl/activity.html?page=1`);
+  const tabId = await worker.evaluate(async (url) => {
+    const [tab] = await chrome.tabs.query({ url });
+    return tab?.id as number;
+  }, page.url());
+  const panel = await context.newPage();
+  await panel.goto(`chrome-extension://${extensionId}/sidepanel.html?tabId=${tabId}`);
+  await expect(panel.getByTestId('model-missing')).toBeVisible();
+
+  // Settings open inside the panel, so they don't depend on Chrome opening another page.
+  await panel.getByTestId('open-settings').click();
+  await panel.getByTestId('model').fill('fake-model');
+  await panel.getByTestId('settings-toggle').click();
+  await expect(panel.getByTestId('model-missing')).toHaveCount(0);
+  await expect(panel.getByTestId('provider-note')).toBeVisible();
+
+  // The gear reaches them too, including with no supported activity on the tab.
+  const empty = await context.newPage();
+  await empty.goto(`chrome-extension://${extensionId}/sidepanel.html?tabId=999999`);
+  await expect(empty.getByTestId('empty-state')).toBeVisible();
+  await empty.getByTestId('settings-toggle').click();
+  await expect(empty.getByTestId('model')).toHaveValue('fake-model');
 });
 
 test('non-supported pages get nothing from Sima', async ({ context, extensionId }) => {

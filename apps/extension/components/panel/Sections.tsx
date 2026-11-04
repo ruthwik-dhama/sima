@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   Sparkles,
   Square,
+  Zap,
 } from 'lucide-react';
 import type {
   ActionRecord,
@@ -56,10 +57,35 @@ export function Disclosure({
     );
   // Reload after an error too, since the fix is often a change on the Settings page.
   const panelError = useTaskStore((s) => s.error);
+  const setSettingsOpen = useTaskStore((s) => s.setSettingsOpen);
   useEffect(() => void load(), [panelError]);
+  // Settings open in another tab, so pick up changes made there without a reload.
+  useEffect(() => {
+    const onChanged = () => void load();
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
   if (!settings) return null;
   const id = settings.activeProvider;
   const provider = providers[id];
+  if (!settings.models[id]) {
+    return (
+      <Alert data-testid="model-missing">
+        <AlertTitle>Choose an AI model to get started</AlertTitle>
+        <AlertDescription>
+          <p>Sima needs a model for {provider.name} before it can work through questions.</p>
+          <Button
+            size="sm"
+            className="mt-2"
+            data-testid="open-settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Open settings
+          </Button>
+        </AlertDescription>
+      </Alert>
+    );
+  }
   if (!provider.external) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="provider-note">
@@ -109,8 +135,8 @@ export function Authorization({ task }: { task: Task }) {
         }
       />
       <Label htmlFor="fill-auth" className="block text-xs leading-snug font-normal">
-        My instructor or course policy allows AI help on this activity, so Sima may enter answers I
-        approve. Sima never submits: that's always up to you.
+        My instructor or course policy allows AI help on this activity, so Sima may enter answers
+        for me to check. Sima never submits: that's always up to you.
       </Label>
     </div>
   );
@@ -140,14 +166,27 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
         <>
           <Button
             size="sm"
+            data-testid="auto-fill"
+            disabled={busy || task.fillAuthorizedAt === null}
+            title={
+              task.fillAuthorizedAt === null ? 'Tick the box above to allow filling' : undefined
+            }
+            onClick={() => void run({ type: 'AUTO_FILL', taskId: id })}
+          >
+            <Zap /> Fill answers
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             data-testid="solve-all"
             disabled={busy || !unsolved}
             onClick={() => void run({ type: 'SOLVE', taskId: id })}
           >
-            <Sparkles /> Work through
+            <Sparkles /> Explain only
           </Button>
           <Button
             size="sm"
+            variant="outline"
             data-testid="execute"
             disabled={busy || actionable === 0 || task.fillAuthorizedAt === null}
             onClick={() => void run({ type: 'EXECUTE', taskId: id })}
