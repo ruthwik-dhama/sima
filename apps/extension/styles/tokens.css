@@ -1,8 +1,9 @@
 /* Design tokens shared by extension pages and the shadow-DOM floating assistant. */
 :root,
 :host {
-  --radius: 0.5rem;
-  --background: #ffffff;
+  --radius: 0.875rem;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 4px 16px rgb(16 24 40 / 0.06);
+  --background: #f6f7f9;
   --foreground: #1f1f1f;
   --card: #ffffff;
   --card-foreground: #1f1f1f;
@@ -12,7 +13,7 @@
   --primary-foreground: #ffffff;
   --secondary: #f0f4f9;
   --secondary-foreground: #1f1f1f;
-  --muted: #f0f4f9;
+  --muted: #f1f3f6;
   --muted-foreground: #5f6368;
   --accent: #e8f0fe;
   --accent-foreground: #0b57d0;
@@ -20,7 +21,7 @@
   --warning: #8a5a00;
   --warning-surface: #fff4d6;
   --success: #146c2e;
-  --border: #dadce0;
+  --border: #e4e7ec;
   --input: #c4c7c5;
   --ring: #0b57d0;
 }
@@ -28,17 +29,18 @@
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
-    --background: #1f1f1f;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
+    --background: #17181a;
     --foreground: #e3e3e3;
-    --card: #282a2c;
+    --card: #222427;
     --card-foreground: #e3e3e3;
-    --popover: #282a2c;
+    --popover: #2a2c2f;
     --popover-foreground: #e3e3e3;
     --primary: #a8c7fa;
     --primary-foreground: #062e6f;
     --secondary: #333537;
     --secondary-foreground: #e3e3e3;
-    --muted: #333537;
+    --muted: #2c2e31;
     --muted-foreground: #a8abaf;
     --accent: #004a77;
     --accent-foreground: #c2e7ff;
@@ -46,7 +48,7 @@
     --warning: #f5cf7a;
     --warning-surface: #3d2f05;
     --success: #6dd58c;
-    --border: #444746;
+    --border: #36383b;
     --input: #5f6368;
     --ring: #a8c7fa;
   }

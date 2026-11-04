@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CircleCheck, CircleX, ImageOff, TriangleAlert } from 'lucide-react';
+import { ChevronRight, CircleCheck, CircleX, ImageOff, TriangleAlert } from 'lucide-react';
 import { autoFillHold } from '@sima/action-planner';
 import {
   optionLetter,
@@ -10,7 +10,6 @@ import {
   type QuestionRecord,
 } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -63,7 +62,7 @@ function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerF
   if (field.options.length > 0) {
     return (
       <Select value={values[0] ?? ''} onValueChange={(value) => void edit([value])}>
-        <SelectTrigger size="sm" className="w-full" data-testid={testId}>
+        <SelectTrigger className="w-full rounded-xl text-sm" data-testid={testId}>
           <SelectValue placeholder="Choose an option" />
         </SelectTrigger>
         <SelectContent>
@@ -79,6 +78,7 @@ function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerF
   const Control = field.kind === 'text' ? Input : Textarea;
   return (
     <Control
+      className="rounded-xl text-sm"
       data-testid={testId}
       aria-label={field.label || field.key}
       value={draft ?? values[0] ?? ''}
@@ -98,11 +98,14 @@ function FieldRow({
   field,
   actions,
   blockers,
+  confidence,
 }: {
   record: QuestionRecord;
   field: AnswerField;
   actions: ActionRecord[];
   blockers: PlanBlocker[];
+  /** Shown on one field only, since it describes the whole question. */
+  confidence: number | null;
 }) {
   const run = useTaskStore((s) => s.run);
   const latest = actions
@@ -112,47 +115,50 @@ function FieldRow({
     (b) => b.fieldKey === field.key && b.questionId === record.question.id,
   );
   const entered = field.currentValues.length > 0;
+  const label = field.label || (record.question.fields.length > 1 ? field.key : '');
+  const stateId = `field-state-${field.key}`;
   return (
-    <div className="flex flex-col gap-1" data-testid={`field-${field.key}`}>
-      <div className="flex items-center gap-1.5">
-        <Label className="text-xs">
-          {field.label || (record.question.fields.length === 1 ? 'Response' : field.key)}
-        </Label>
-        <span className="text-[11px] text-muted-foreground" title={field.mappingReason}>
-          match {Math.round(field.mappingConfidence * 100)}%
-        </span>
+    <div className="flex flex-col gap-1.5" data-testid={`field-${field.key}`}>
+      {label && <Label className="text-xs text-muted-foreground">{label}</Label>}
+      <FieldEditor record={record} field={field} />
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {confidence !== null && (
+          <>
+            <span data-testid={`confidence-${record.question.id}`}>{confidence}% confident</span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <span title={field.mappingReason}>match {Math.round(field.mappingConfidence * 100)}%</span>
         {latest?.status === 'failed' ? (
-          <Badge variant="destructive" data-testid={`field-state-${field.key}`} className="ml-auto">
+          <span className="ml-auto font-medium text-destructive" data-testid={stateId}>
             Not entered
-          </Badge>
+          </span>
         ) : entered && latest?.status === 'verified' ? (
-          <Badge
-            variant="secondary"
-            data-testid={`field-state-${field.key}`}
-            className="ml-auto text-success"
+          <span
+            className="ml-auto flex items-center gap-1 font-medium text-success"
+            data-testid={stateId}
           >
-            <CircleCheck /> Entered
-          </Badge>
+            <CircleCheck className="size-3" /> Entered
+          </span>
         ) : entered ? (
-          <Badge variant="outline" data-testid={`field-state-${field.key}`} className="ml-auto">
+          <span className="ml-auto" data-testid={stateId}>
             Has a value
-          </Badge>
+          </span>
         ) : null}
       </div>
-      <FieldEditor record={record} field={field} />
       {latest?.status === 'failed' && (
         <p className="text-xs text-destructive">{latest.result?.detail}</p>
       )}
       {blocker?.code === 'low_mapping_confidence' && (
         <div
-          className="flex items-center justify-between gap-2 rounded-md bg-warning-surface p-1.5 text-xs text-warning"
+          className="flex items-center justify-between gap-2 rounded-lg bg-warning-surface p-2 text-xs text-warning"
           data-testid={`confirm-${field.key}`}
         >
           <span>Sima can't read these choices. Check the page before confirming.</span>
           <Button
             size="sm"
             variant="outline"
-            className="h-6"
+            className="h-7"
             onClick={() =>
               void run({ type: 'CONFIRM_FIELD', recordId: record.id, fieldKey: field.key })
             }
@@ -163,14 +169,14 @@ function FieldRow({
       )}
       {blocker?.code === 'existing_value' && (
         <div
-          className="flex items-center justify-between gap-2 rounded-md bg-warning-surface p-1.5 text-xs text-warning"
+          className="flex items-center justify-between gap-2 rounded-lg bg-warning-surface p-2 text-xs text-warning"
           data-testid={`overwrite-${field.key}`}
         >
           <span>This field holds "{field.currentValues.join(', ').slice(0, 60)}".</span>
           <Button
             size="sm"
             variant="outline"
-            className="h-6"
+            className="h-7"
             onClick={() =>
               void run({ type: 'ALLOW_OVERWRITE', recordId: record.id, fieldKey: field.key })
             }
@@ -181,6 +187,14 @@ function FieldRow({
       )}
     </div>
   );
+}
+
+/** The number has its own badge and images their own line, so neither repeats in the text. */
+function promptText(prompt: string, number: string): string {
+  return prompt
+    .replace(new RegExp(`^\\s*Q?${number}[.):]\\s*`, 'i'), '')
+    .replace(/\s*\[image:[^\]]*\]/g, '')
+    .trim();
 }
 
 export function QuestionCard({
@@ -196,30 +210,29 @@ export function QuestionCard({
   const { question, solution } = record;
   const [followUp, setFollowUp] = useState('');
   const confidence = solution ? Math.round(solution.adjustedConfidence * 100) : null;
+  const ignored = question.suspiciousText[0];
 
   return (
-    <Card className="gap-2 py-3" data-testid={`question-${question.id}`}>
-      <CardContent className="flex flex-col gap-2 px-3">
-        <div className="flex items-center gap-1.5">
-          <Badge variant="outline">Q{question.number}</Badge>
-          <span className="text-xs text-muted-foreground">{question.format.replace('_', ' ')}</span>
-          {confidence !== null && (
-            <span
-              className="ml-auto text-xs text-muted-foreground"
-              data-testid={`confidence-${question.id}`}
-            >
-              {confidence}% confident
-            </span>
-          )}
+    <Card
+      className="sima-card gap-0 rounded-2xl border-0 py-4 ring-0"
+      data-testid={`question-${question.id}`}
+    >
+      <CardContent className="flex flex-col gap-3 px-4">
+        <div className="flex items-start gap-2.5">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
+            {question.number}
+          </span>
+          <p className="min-w-0 pt-0.5 font-medium" data-testid={`prompt-${question.id}`}>
+            {promptText(question.prompt, question.number)}
+          </p>
         </div>
-        <p data-testid={`prompt-${question.id}`}>{question.prompt}</p>
         {question.tables.map((table, t) => (
-          <table key={t} className="w-full border-collapse text-xs">
+          <table key={t} className="w-full border-collapse overflow-hidden rounded-lg text-xs">
             <tbody>
               {table.map((row, r) => (
-                <tr key={r}>
+                <tr key={r} className="odd:bg-muted">
                   {row.map((cell, c) => (
-                    <td key={c} className="border px-1.5 py-0.5">
+                    <td key={c} className="px-2 py-1">
                       {cell}
                     </td>
                   ))}
@@ -229,105 +242,111 @@ export function QuestionCard({
           </table>
         ))}
         {question.images.map((image, i) => (
-          <p key={i} className="flex items-center gap-1 text-xs text-muted-foreground">
-            <ImageOff className="size-3" /> Image, not sent to the model:{' '}
+          <p key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ImageOff className="size-3 shrink-0" /> Image, not sent to the model:{' '}
             {image.alt || 'no description'}
           </p>
         ))}
-        {question.suspiciousText.length > 0 && (
-          <Alert data-testid={`injection-${question.id}`}>
-            <TriangleAlert className="size-4" />
-            <AlertDescription>
-              Sima ignored this line, which is aimed at AI tools: "{question.suspiciousText[0]}"
-              Instructors sometimes add lines like this to spot AI use.
-            </AlertDescription>
-          </Alert>
-        )}
         {record.solveError && (
           <Alert variant="destructive" data-testid={`solve-error-${question.id}`}>
             <AlertDescription>{record.solveError}</AlertDescription>
           </Alert>
         )}
 
-        {solution && (
-          <details
-            open
-            className="rounded-md bg-muted p-2 text-xs"
-            data-testid={`explanation-${question.id}`}
-          >
-            <summary className="cursor-pointer font-medium">Explanation</summary>
-            <p className="mt-1">{solution.explanation}</p>
-            {solution.steps.length > 0 && (
-              <ol className="mt-1 list-decimal pl-4">
-                {solution.steps.map((step, i) => (
-                  <li key={i}>{step}</li>
-                ))}
-              </ol>
-            )}
-            {solution.checks.length > 0 && (
-              <ul className="mt-1.5 flex flex-col gap-0.5" data-testid={`checks-${question.id}`}>
-                {solution.checks.map((check, i) => (
-                  <li key={i} className="flex items-start gap-1" data-check={check.status}>
-                    {check.status === 'pass' ? (
-                      <CircleCheck className="mt-0.5 size-3 shrink-0 text-success" />
-                    ) : check.status === 'fail' ? (
-                      <CircleX className="mt-0.5 size-3 shrink-0 text-destructive" />
-                    ) : (
-                      <TriangleAlert className="mt-0.5 size-3 shrink-0 text-warning" />
-                    )}
-                    <span>
-                      {check.name}: {check.detail}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
+        {(solution || Object.keys(record.responses).length > 0) &&
+          question.fields.map((field, index) => (
+            <FieldRow
+              key={field.key}
+              record={record}
+              field={field}
+              actions={actions}
+              blockers={blockers}
+              confidence={index === 0 ? confidence : null}
+            />
+          ))}
+        {solution && !record.approved && autoFillHold(record) && (
+          <p className="text-xs text-warning" data-testid={`held-${question.id}`}>
+            {autoFillHold(record)}. Type an answer above, then click Fill answers.
+          </p>
         )}
-        {record.followUps.map((item) => (
-          <div key={item.at} className="text-xs" data-testid="follow-up-entry">
-            <p className="font-medium">{item.question}</p>
-            <p>{item.answer}</p>
-          </div>
-        ))}
 
-        {(solution || Object.keys(record.responses).length > 0) && (
-          <>
-            {question.fields.map((field) => (
-              <FieldRow
-                key={field.key}
-                record={record}
-                field={field}
-                actions={actions}
-                blockers={blockers}
-              />
-            ))}
-            {solution && !record.approved && autoFillHold(record) && (
-              <p className="text-xs text-warning" data-testid={`held-${question.id}`}>
-                {autoFillHold(record)}. Type an answer above, then click Fill answers.
-              </p>
-            )}
-            <form
-              className="flex gap-1.5"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (!followUp.trim()) return;
-                void run({ type: 'FOLLOW_UP', recordId: record.id, question: followUp.trim() });
-                setFollowUp('');
-              }}
+        {solution && (
+          <details className="group -mb-1 text-xs" data-testid={`explanation-${question.id}`}>
+            <summary
+              className="flex cursor-pointer list-none items-center gap-1 font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden"
+              data-testid={`explanation-toggle-${question.id}`}
             >
-              <Input
-                data-testid={`follow-up-${question.id}`}
-                className="h-7 text-xs"
-                placeholder="Ask about this, or for another explanation"
-                value={followUp}
-                onChange={(e) => setFollowUp(e.target.value)}
-              />
-              <Button type="submit" size="sm" variant="outline" className="h-7">
-                Ask
-              </Button>
-            </form>
-          </>
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" />
+              Explanation
+              {ignored && (
+                <TriangleAlert
+                  className="ml-1 size-3 text-warning"
+                  aria-label="Sima ignored a line aimed at AI tools"
+                  data-testid={`injection-marker-${question.id}`}
+                />
+              )}
+            </summary>
+            <div className="mt-2 flex flex-col gap-2 rounded-xl bg-muted p-3">
+              {ignored && (
+                <p className="text-warning" data-testid={`injection-${question.id}`}>
+                  Sima ignored this line, which is aimed at AI tools: "{ignored}" Instructors
+                  sometimes add lines like this to spot AI use.
+                </p>
+              )}
+              <p>{solution.explanation}</p>
+              {solution.steps.length > 0 && (
+                <ol className="flex list-decimal flex-col gap-0.5 pl-4">
+                  {solution.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
+                </ol>
+              )}
+              {solution.checks.length > 0 && (
+                <ul className="flex flex-col gap-0.5" data-testid={`checks-${question.id}`}>
+                  {solution.checks.map((check, i) => (
+                    <li key={i} className="flex items-start gap-1" data-check={check.status}>
+                      {check.status === 'pass' ? (
+                        <CircleCheck className="mt-0.5 size-3 shrink-0 text-success" />
+                      ) : check.status === 'fail' ? (
+                        <CircleX className="mt-0.5 size-3 shrink-0 text-destructive" />
+                      ) : (
+                        <TriangleAlert className="mt-0.5 size-3 shrink-0 text-warning" />
+                      )}
+                      <span>
+                        {check.name}: {check.detail}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {record.followUps.map((item) => (
+                <div key={item.at} data-testid="follow-up-entry">
+                  <p className="font-medium">{item.question}</p>
+                  <p>{item.answer}</p>
+                </div>
+              ))}
+              <form
+                className="flex gap-1.5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!followUp.trim()) return;
+                  void run({ type: 'FOLLOW_UP', recordId: record.id, question: followUp.trim() });
+                  setFollowUp('');
+                }}
+              >
+                <Input
+                  data-testid={`follow-up-${question.id}`}
+                  className="h-8 bg-card text-xs"
+                  placeholder="Ask about this question"
+                  value={followUp}
+                  onChange={(e) => setFollowUp(e.target.value)}
+                />
+                <Button type="submit" size="sm" variant="outline" className="h-8 bg-card">
+                  Ask
+                </Button>
+              </form>
+            </div>
+          </details>
         )}
       </CardContent>
     </Card>

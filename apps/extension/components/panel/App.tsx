@@ -2,27 +2,12 @@ import { useEffect } from 'react';
 import { ArrowLeft, CircleAlert, Settings, Sparkles } from 'lucide-react';
 import { PROVIDER_ENDPOINTS } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { SettingsPage } from '@/components/SettingsPage';
 import { useTaskStore } from '@/stores/task-store';
-import { Authorization, Controls, Disclosure, Restricted } from './Sections';
+import { Controls, Disclosure, Restricted } from './Sections';
 import { QuestionCard } from './QuestionCard';
-
-const STATUS_LABEL: Record<string, string> = {
-  analyzing: 'Reading page',
-  blocked_restricted: 'Not available',
-  ready: 'Ready',
-  reasoning: 'Working',
-  review: 'Review',
-  executing: 'Filling',
-  navigating: 'Changing page',
-  paused: 'Paused',
-  completed: 'Finished',
-  stopped: 'Stopped',
-  error: 'Needs attention',
-};
 
 export function App() {
   const { view, error, setTab, refresh, dismissError, settingsOpen, setSettingsOpen } =
@@ -56,19 +41,19 @@ export function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-10 flex flex-col gap-2 border-b bg-background px-3 py-2">
+      <header
+        className="sticky top-0 z-10 flex flex-col gap-3 bg-background/90 px-4 pt-3 pb-3 backdrop-blur"
+        data-testid="task-status"
+        data-status={task?.status}
+        data-page={analysis?.pagination.index}
+      >
         <div className="flex items-center gap-2">
           <Sparkles className="size-4 text-primary" />
-          <span className="font-medium">Sima</span>
-          {task && (
-            <Badge variant="secondary" data-testid="task-status" data-status={task.status}>
-              {STATUS_LABEL[task.status] ?? task.status}
-            </Badge>
-          )}
+          <span className="font-semibold">Sima</span>
           <Button
             variant="ghost"
             size="icon"
-            className="ml-auto size-7"
+            className="ml-auto size-8 rounded-full text-muted-foreground"
             aria-label={settingsOpen ? 'Back to activity' : 'Open settings'}
             data-testid="settings-toggle"
             onClick={() => setSettingsOpen(!settingsOpen)}
@@ -77,21 +62,26 @@ export function App() {
           </Button>
         </div>
         {task && (
-          <div className="min-w-0">
-            <p className="truncate font-medium" data-testid="activity-title">
+          <div className="flex min-w-0 flex-col gap-2">
+            <h1
+              className="truncate text-base leading-snug font-semibold"
+              data-testid="activity-title"
+            >
               {task.activityTitle}
-            </p>
-            <p className="text-xs text-muted-foreground" data-testid="page-position">
-              {task.platformName}
-              {analysis && analysis.pagination.total > 1
-                ? ` · Page ${analysis.pagination.index} of ${analysis.pagination.total}`
-                : ''}
-              {progress && progress.total > 0
-                ? ` · ${progress.answered} of ${progress.total} answered`
-                : ''}
-            </p>
+            </h1>
             {progress && progress.total > 0 && (
-              <Progress className="mt-1 h-1" value={(progress.answered / progress.total) * 100} />
+              <div className="flex items-center gap-3">
+                <Progress
+                  className="h-1.5 flex-1"
+                  value={(progress.answered / progress.total) * 100}
+                />
+                <span
+                  className="shrink-0 text-xs text-muted-foreground"
+                  data-testid="progress-text"
+                >
+                  {progress.answered} of {progress.total} answered
+                </span>
+              </div>
             )}
           </div>
         )}
@@ -100,7 +90,7 @@ export function App() {
       {settingsOpen ? (
         <SettingsPage />
       ) : (
-        <main className="flex flex-col gap-3 p-3">
+        <main className="flex flex-col gap-3 px-4 pt-1 pb-6">
           {error && (
             <Alert variant="destructive" data-testid="panel-error">
               <CircleAlert className="size-4" />
@@ -141,13 +131,7 @@ export function App() {
             view && (
               <>
                 <Disclosure providers={PROVIDER_ENDPOINTS} />
-                <Authorization task={task} />
-                <Controls view={view} task={task} />
-                {analysis?.instructions && (
-                  <p className="rounded-md bg-muted p-2 text-xs" data-testid="instructions">
-                    {analysis.instructions}
-                  </p>
-                )}
+                <Controls key={task.id} view={view} task={task} />
                 {view.questions.map((record) => (
                   <QuestionCard
                     key={record.id}

@@ -1,4 +1,4 @@
-import { expect, MOCK, status, test } from './fixtures';
+import { expect, fillFirstTime, MOCK, onPage, status, test } from './fixtures';
 
 test.describe('foundation', () => {
   test('manifest asks for the minimum', async ({ worker }) => {
@@ -8,11 +8,11 @@ test.describe('foundation', () => {
     expect(manifest.host_permissions).not.toContain('<all_urls>');
   });
 
-  test('floating assistant appears in an isolated shadow root, and can minimize and dismiss', async ({
-    context,
+  test('the floating pill is isolated, opens the panel, and can be dismissed', async ({
     openActivity,
+    worker,
   }) => {
-    const { page } = await openActivity('/gradescope/assignment.html');
+    const { page, tabId } = await openActivity('/gradescope/assignment.html');
     // Hostile host CSS must not reach the assistant.
     await page.addStyleTag({
       content:
@@ -20,7 +20,7 @@ test.describe('foundation', () => {
     });
     const floating = page.getByTestId('sima-floating');
     await expect(floating).toBeVisible();
-    await expect(page.getByTestId('sima-floating-status')).toContainText('answered');
+    await expect(page.getByTestId('sima-floating-status')).toContainText('0 of 5');
     const style = await page.getByTestId('sima-floating-status').evaluate((el) => {
       const s = getComputedStyle(el);
       return { fontSize: s.fontSize, color: s.color };
@@ -29,24 +29,39 @@ test.describe('foundation', () => {
     expect(style.color).not.toBe('rgb(255, 0, 0)');
     const box = await floating.evaluate((el) => {
       const s = getComputedStyle(el);
-      return { position: s.position, width: s.width, boxShadow: s.boxShadow };
+      return {
+        position: s.position,
+        height: el.getBoundingClientRect().height,
+        boxShadow: s.boxShadow,
+      };
     });
-    expect(box).toMatchObject({ position: 'fixed', width: '256px' });
+    expect(box.position).toBe('fixed');
+    expect(box.height).toBeLessThan(44);
     expect(box.boxShadow).not.toBe('none');
-    const isShadow = await page
-      .getByTestId('sima-floating')
-      .evaluate((el) => el.getRootNode() instanceof ShadowRoot);
-    expect(isShadow).toBe(true);
+    expect(await floating.evaluate((el) => el.getRootNode() instanceof ShadowRoot)).toBe(true);
 
-    await page.getByTestId('sima-floating-minimize').click();
-    await expect(page.getByTestId('sima-floating')).toHaveCount(0);
-    await page.getByTestId('sima-floating-expand').click();
+    // Clicking the pill asks the background to open the panel for this tab.
+    await worker.evaluate(() => {
+      const target = globalThis as unknown as { openedTab: number | null };
+      target.openedTab = null;
+      chrome.sidePanel.open = (async (options: { tabId: number }) => {
+        target.openedTab = options.tabId;
+      }) as unknown as typeof chrome.sidePanel.open;
+    });
+    await page.getByTestId('sima-floating-open').click();
+    await expect
+      .poll(() => worker.evaluate(() => (globalThis as unknown as { openedTab: number }).openedTab))
+      .toBe(tabId);
+
+    await page.mouse.move(0, 0);
+    await expect(page.getByTestId('sima-floating-dismiss')).toHaveCSS('opacity', '0');
+    await floating.hover();
+    await expect(page.getByTestId('sima-floating-dismiss')).toHaveCSS('opacity', '1');
     await page.getByTestId('sima-floating-dismiss').click();
-    await expect(page.getByTestId('sima-floating')).toHaveCount(0);
+    await expect(floating).toHaveCount(0);
     await page.reload();
     await page.waitForTimeout(800);
-    await expect(page.getByTestId('sima-floating')).toHaveCount(0);
-    void context;
+    await expect(floating).toHaveCount(0);
   });
 
   test('API keys are unreachable from the content script context', async ({
@@ -172,10 +187,7 @@ test.describe('Gradescope mock', () => {
     expect(q4).toContain('<page_content>');
     await expect(panel.getByTestId('injection-q4')).toContainText('banana');
 
-    // Filling is locked until the user authorizes it for this activity.
-    await expect(panel.getByTestId('auto-fill')).toBeDisabled();
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(panel.getByTestId('field-state-q3')).toContainText('Entered', { timeout: 15000 });
     await status(panel, 'review');
 
@@ -186,7 +198,7 @@ test.describe('Gradescope mock', () => {
     await expect(page.locator('input[name=q3]')).toHaveValue('93');
     await expect(page.locator('textarea[name=q4]')).toHaveValue(/Gravity/);
     await expect(page.locator('input[name=q5]')).toHaveValue('2.2');
-    await expect(panel.getByTestId('page-position')).toContainText('5 of 5 answered');
+    await expect(panel.getByTestId('progress-text')).toContainText('5 of 5 answered');
 
     // An edit is what gets entered next, replacing Sima's own earlier entry.
     await panel.getByTestId('response-q3').fill('94');
@@ -203,8 +215,7 @@ test.describe('Gradescope mock', () => {
       'Fill answers',
       'Explain only',
     ]);
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(panel.getByTestId('field-state-q3')).toContainText('Entered', { timeout: 15000 });
     await status(panel, 'review');
     await expect(panel.getByText('Activity log')).toHaveCount(0);
@@ -217,6 +228,7 @@ test.describe('Gradescope mock', () => {
     await status(panel, 'ready');
     await panel.getByTestId('solve-all').click();
     await status(panel, 'review');
+    await panel.getByTestId('explanation-toggle-q1').click();
     await panel.getByTestId('follow-up-q1').fill('Explain it another way');
     await panel.getByTestId('follow-up-q1').press('Enter');
     await expect(panel.getByTestId('follow-up-entry')).toContainText('rate of change');
@@ -280,8 +292,7 @@ test.describe('Gradescope mock', () => {
     });
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
 
     await expect(page.locator('input[name=q1][value=b]')).toBeChecked({ timeout: 15000 });
     await expect(page.locator('input[name=q2][value=two]')).toBeChecked();
@@ -310,8 +321,7 @@ test.describe('Gradescope mock', () => {
     );
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(page.locator('input[name=q1][value=b]')).toBeChecked({ timeout: 15000 });
   });
 
@@ -330,8 +340,7 @@ test.describe('Gradescope mock', () => {
     );
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
   });
 
@@ -341,10 +350,7 @@ test.describe('Gradescope mock', () => {
   }) => {
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await expect(panel.getByTestId('auto-fill')).toBeDisabled();
-    await panel.getByTestId('authorize-fill').click();
-    await expect(panel.getByTestId('auto-fill')).toBeEnabled();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
 
     await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
     await expect(page.locator('input[name=q1][value=b]')).toBeChecked();
@@ -365,14 +371,113 @@ test.describe('Gradescope mock', () => {
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
     await page.locator('input[name=q3]').fill('my own answer');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(panel.getByTestId('overwrite-q3')).toBeVisible({ timeout: 15000 });
     await status(panel, 'review');
     await expect(page.locator('input[name=q3]')).toHaveValue('my own answer');
     await panel.getByTestId('overwrite-q3').getByRole('button').click();
     await panel.getByTestId('auto-fill').click();
     await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
+  });
+});
+
+test.describe('permission prompt', () => {
+  test('Cancel fills nothing and asks again next time', async ({ openActivity, model }) => {
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await expect(panel.getByTestId('fill-permission')).toHaveCount(0);
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('fill-permission')).toContainText('allow AI help');
+    await expect(panel.getByTestId('fill-permission')).toContainText('never submits');
+    await panel.getByTestId('permission-cancel').click();
+    await expect(panel.getByTestId('fill-permission')).toHaveCount(0);
+    expect(model.requests).toEqual([]);
+    await expect(page.locator('input[name=q3]')).toHaveValue('');
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('fill-permission')).toBeVisible();
+  });
+
+  test('Explain only never asks, and fills nothing', async ({ openActivity }) => {
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await panel.getByTestId('solve-all').click();
+    await status(panel, 'review');
+    await expect(panel.getByTestId('fill-permission')).toHaveCount(0);
+    await expect(page.locator('input[name=q3]')).toHaveValue('');
+  });
+
+  test('Yes lasts for every page of the activity, but not for another activity', async ({
+    openActivity,
+  }) => {
+    const { page, panel } = await openActivity('/vhl/activity.html?page=1');
+    await status(panel, 'ready');
+    await fillFirstTime(panel);
+    await expect(page.locator('input[name=p1i1]')).toHaveValue('soy', { timeout: 15000 });
+    await status(panel, 'review');
+
+    await page.locator('[data-vhl-next]').click();
+    await onPage(panel, 2);
+    await status(panel, 'ready');
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('fill-permission')).toHaveCount(0);
+    await expect(page.locator('select[name=m1]')).toHaveValue('apple', { timeout: 15000 });
+
+    // Survives a reload of the panel too.
+    await status(panel, 'review');
+    await panel.reload();
+    await status(panel, 'review');
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('fill-permission')).toHaveCount(0);
+
+    const other = await openActivity('/gradescope/assignment.html');
+    await status(other.panel, 'ready');
+    await other.panel.getByTestId('auto-fill').click();
+    await expect(other.panel.getByTestId('fill-permission')).toBeVisible();
+  });
+});
+
+test.describe('answer-first cards', () => {
+  test('the explanation starts collapsed, with the Ask box and notes inside', async ({
+    openActivity,
+  }) => {
+    const { panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await panel.getByTestId('solve-all').click();
+    await status(panel, 'review');
+
+    await expect(panel.getByTestId('response-q3')).toBeVisible();
+    await expect(panel.getByTestId('confidence-q3')).toBeVisible();
+    await expect(panel.getByTestId('field-q3')).toContainText('match');
+    await expect(panel.getByTestId('checks-q3')).toBeHidden();
+    await expect(panel.getByTestId('follow-up-q3')).toBeHidden();
+    await expect(panel.getByTestId('injection-q4')).toBeHidden();
+    await expect(panel.getByTestId('injection-marker-q4')).toBeVisible();
+    await expect(panel.getByTestId('prompt-q3')).not.toContainText('Q3.');
+    await expect(panel.getByTestId('prompt-q5')).not.toContainText('[image:');
+    await expect(panel.getByTestId('question-q3')).not.toContainText('numeric');
+
+    await panel.getByTestId('explanation-toggle-q3').click();
+    await expect(panel.getByTestId('checks-q3')).toBeVisible();
+    await expect(panel.getByTestId('follow-up-q3')).toBeVisible();
+    await panel.getByTestId('explanation-toggle-q4').click();
+    await expect(panel.getByTestId('injection-q4')).toContainText('banana');
+    await expect(panel.getByTestId('injection-q4')).toBeVisible();
+
+    // Staying open matters: state updates shouldn't snap the section shut.
+    await panel.getByTestId('response-q3').fill('edited');
+    await panel.getByTestId('response-q3').blur();
+    await expect(panel.getByTestId('response-q3')).toHaveValue('edited');
+    await expect(panel.getByTestId('checks-q3')).toBeVisible();
+  });
+
+  test('the header shows only the title and progress', async ({ openActivity }) => {
+    const { panel } = await openActivity('/webassign/assignment.html?q=1');
+    await status(panel, 'ready');
+    await expect(panel.getByTestId('activity-title')).toHaveText('Ch. 2 Homework');
+    await expect(panel.getByTestId('progress-text')).toContainText('0 of 1 answered');
+    await expect(panel.getByTestId('task-status')).not.toContainText('WebAssign');
+    await expect(panel.getByTestId('task-status')).not.toContainText('Page 1');
+    await expect(panel.getByText('Enter answers with appropriate units')).toHaveCount(0);
   });
 });
 
@@ -383,16 +488,13 @@ test.describe('VHL mock', () => {
     const { page, panel } = await openActivity('/vhl/activity.html?page=1');
     await status(panel, 'ready');
     await expect(panel.getByTestId('activity-title')).toHaveText('Lección 3: Completar');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(page.locator('input[name=p1i2]')).toHaveValue('vivió', { timeout: 15000 });
     await status(panel, 'review');
 
     // The student moves on with the page's own button, and Sima follows.
     await page.locator('[data-vhl-next]').click();
-    await expect(panel.getByTestId('page-position')).toContainText('Page 2 of 3', {
-      timeout: 15000,
-    });
+    await onPage(panel, 2);
     await status(panel, 'ready');
     await panel.getByTestId('auto-fill').click();
     await expect(page.locator('select[name=m1]')).toHaveValue('apple', { timeout: 15000 });
@@ -401,9 +503,7 @@ test.describe('VHL mock', () => {
     await status(panel, 'review');
 
     await page.locator('[data-vhl-next]').click();
-    await expect(panel.getByTestId('page-position')).toContainText('Page 3 of 3', {
-      timeout: 15000,
-    });
+    await onPage(panel, 3);
     await status(panel, 'ready');
   });
 });
@@ -415,16 +515,13 @@ test.describe('WebAssign mock', () => {
   }) => {
     const { page, panel } = await openActivity('/webassign/assignment.html?q=1');
     await status(panel, 'ready');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(page.locator('input[name=speed]')).toHaveValue('12.5', { timeout: 15000 });
     await expect(page.locator('select[name=speed_unit]')).toHaveValue('m/s');
     await status(panel, 'review');
 
     await page.locator('[data-wa-next]').click();
-    await expect(panel.getByTestId('page-position')).toContainText('Page 2 of 3', {
-      timeout: 15000,
-    });
+    await onPage(panel, 2);
     await status(panel, 'ready');
     await panel.getByTestId('auto-fill').click();
     await expect(panel.getByTestId('field-state-ke')).toContainText('Entered', { timeout: 15000 });
@@ -434,9 +531,7 @@ test.describe('WebAssign mock', () => {
     await status(panel, 'review');
 
     await page.locator('[data-wa-next]').click();
-    await expect(panel.getByTestId('page-position')).toContainText('Page 3 of 3', {
-      timeout: 15000,
-    });
+    await onPage(panel, 3);
     await status(panel, 'ready');
     await panel.getByTestId('auto-fill').click();
 
@@ -458,7 +553,6 @@ test.describe('persistence and recovery', () => {
     await panel.getByTestId('response-q3').fill('edited');
     await panel.getByTestId('response-q3').blur();
     await expect(panel.getByTestId('response-q3')).toHaveValue('edited');
-    await panel.getByTestId('explanation-q1').click();
     await page.reload();
     await status(panel, 'review');
     await panel.reload();
@@ -490,8 +584,8 @@ test.describe('persistence and recovery', () => {
     await panel.reload();
     await status(panel, 'review');
     await expect(panel.getByTestId('explanation-q1')).toBeVisible();
-    await panel.getByTestId('authorize-fill').click();
-    await expect(panel.getByTestId('authorize-fill')).toBeChecked();
+    await fillFirstTime(panel);
+    await expect(panel.getByTestId('field-state-q1')).toContainText('Entered', { timeout: 15000 });
   });
 
   test('Fill answers picks a stopped task back up', async ({ openActivity }) => {
@@ -503,8 +597,7 @@ test.describe('persistence and recovery', () => {
     }, tabId);
     await panel.reload();
     await status(panel, 'stopped');
-    await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('auto-fill').click();
+    await fillFirstTime(panel);
     await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
     await status(panel, 'review');
   });

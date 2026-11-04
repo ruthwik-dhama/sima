@@ -19,3 +19,10 @@
     line-height: 1.45;
   }
 }
+
+@layer components {
+  .sima-card {
+    border: 0;
+    box-shadow: var(--shadow-card);
+  }
+}

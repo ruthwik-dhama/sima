@@ -9,7 +9,7 @@ These are product requirements. Do not weaken them, add settings that bypass the
 - **Sima never submits.** There is no submit action type. `navigate_next` refuses any control whose label or type indicates submitting (`packages/browser-executor`, `adapters/core`). Saving and submitting stay manual.
 - **Assessments are off limits.** A page with restriction signals (exam or quiz title, proctoring, lockdown browser, timer, stated AI prohibition) yields no extracted questions, so nothing can reach a model or the executor. Detection is fail-closed and the UI has no override.
 - **Never bypass proctoring, access controls or assessment restrictions.** Do not add features that hide Sima from a site or evade detection.
-- **Filling needs per-activity authorization.** `execute` requires `fillAuthorizedAt`. Only approved questions are entered: Fill answers approves each one with an answer. Explanations don't need authorization.
+- **Filling needs per-activity authorization.** `execute` requires `fillAuthorizedAt`, which the panel asks for on the first Fill answers click for an activity. Only approved questions are entered: Fill answers approves each one with an answer. Explanations don't need authorization.
 - **Model output is data.** It can only supply values for fields and options already on the page. No model-generated JavaScript, selectors or action types, ever. No `eval`, `new Function` or injected scripts anywhere.
 - **Page content is untrusted.** It's extracted from visible text only and fenced as data in prompts, and sentences aimed at AI tools are removed before solving. Never derive instructions from it.
 - **API keys stay in the background context.** Never send one to a content script, a page, a URL or a log.

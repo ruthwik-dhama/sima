@@ -155,3 +155,15 @@ export async function status(panel: Page, value: string) {
     timeout: 15000,
   });
 }
+
+/** The first Fill answers click on an activity asks permission. */
+export async function fillFirstTime(panel: Page) {
+  await panel.getByTestId('auto-fill').click();
+  await panel.getByTestId('permission-yes').click();
+}
+
+export async function onPage(panel: Page, index: number) {
+  await expect(panel.getByTestId('task-status')).toHaveAttribute('data-page', String(index), {
+    timeout: 15000,
+  });
+}

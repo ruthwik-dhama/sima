@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ShieldAlert, Sparkles, Zap } from 'lucide-react';
+import { LoaderCircle, ShieldAlert, Sparkles, Zap } from 'lucide-react';
 import type { PageAnalysis, ProviderId, Settings, Task, TaskView } from '@sima/shared-types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { sendCommand } from '@/services/messaging';
 import { useTaskStore } from '@/stores/task-store';
 
@@ -92,53 +90,91 @@ export function Disclosure({
   );
 }
 
-export function Authorization({ task }: { task: Task }) {
-  const run = useTaskStore((s) => s.run);
-  return (
-    <div className="flex items-start gap-2 rounded-md border p-2">
-      <Checkbox
-        id="fill-auth"
-        data-testid="authorize-fill"
-        checked={task.fillAuthorizedAt !== null}
-        onCheckedChange={(checked) =>
-          void run({ type: 'AUTHORIZE_FILL', taskId: task.id, authorized: checked === true })
-        }
-      />
-      <Label htmlFor="fill-auth" className="block text-xs leading-snug font-normal">
-        My instructor or course policy allows AI help on this activity, so Sima may enter answers
-        for me to check. Sima never submits: that's always up to you.
-      </Label>
-    </div>
-  );
-}
-
 export function Controls({ view, task }: { view: TaskView; task: Task }) {
   const run = useTaskStore((s) => s.run);
+  const [asking, setAsking] = useState(false);
+  const [running, setRunning] = useState<'fill' | 'explain' | null>(null);
   const busy = ['analyzing', 'reasoning', 'executing', 'navigating'].includes(task.status);
   const unsolved = view.questions.some(
     (r) => !Object.values(r.responses).some((values) => values.length > 0),
   );
 
+  const start = async (kind: 'fill' | 'explain') => {
+    setRunning(kind);
+    await run(
+      kind === 'fill' ? { type: 'AUTO_FILL', taskId: task.id } : { type: 'SOLVE', taskId: task.id },
+    );
+    setRunning(null);
+  };
+
+  const filling =
+    task.status === 'executing' || (task.status === 'reasoning' && running !== 'explain');
+  const explaining = task.status === 'reasoning' && running === 'explain';
+  const iconClass = 'animate-spin';
+
   return (
-    <div className="flex flex-wrap gap-1.5" data-testid="controls">
-      <Button
-        size="sm"
-        data-testid="auto-fill"
-        disabled={busy || task.fillAuthorizedAt === null}
-        title={task.fillAuthorizedAt === null ? 'Tick the box above to allow filling' : undefined}
-        onClick={() => void run({ type: 'AUTO_FILL', taskId: task.id })}
-      >
-        <Zap /> Fill answers
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        data-testid="solve-all"
-        disabled={busy || !unsolved}
-        onClick={() => void run({ type: 'SOLVE', taskId: task.id })}
-      >
-        <Sparkles /> Explain only
-      </Button>
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-2" data-testid="controls">
+        <Button
+          className="h-10 rounded-xl"
+          data-testid="auto-fill"
+          disabled={busy}
+          onClick={() => {
+            if (task.fillAuthorizedAt === null) setAsking(true);
+            else void start('fill');
+          }}
+        >
+          {filling ? <LoaderCircle className={iconClass} /> : <Zap />}
+          {filling ? 'Filling…' : 'Fill answers'}
+        </Button>
+        <Button
+          className="h-10 rounded-xl bg-card"
+          variant="outline"
+          data-testid="solve-all"
+          disabled={busy || !unsolved}
+          onClick={() => void start('explain')}
+        >
+          {explaining ? <LoaderCircle className={iconClass} /> : <Sparkles />}
+          {explaining ? 'Explaining…' : 'Explain only'}
+        </Button>
+      </div>
+      {asking && (
+        <div
+          role="alertdialog"
+          aria-labelledby="fill-permission-title"
+          className="sima-card flex flex-col gap-3 rounded-xl bg-card p-4"
+          data-testid="fill-permission"
+        >
+          <div>
+            <p className="font-medium" id="fill-permission-title">
+              Does your course allow AI help on this activity?
+            </p>
+            <p className="text-xs text-muted-foreground">Sima never submits for you.</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="permission-cancel"
+              onClick={() => setAsking(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              data-testid="permission-yes"
+              onClick={() => {
+                setAsking(false);
+                void run({ type: 'AUTHORIZE_FILL', taskId: task.id, authorized: true }).then(() =>
+                  start('fill'),
+                );
+              }}
+            >
+              Yes, fill
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
