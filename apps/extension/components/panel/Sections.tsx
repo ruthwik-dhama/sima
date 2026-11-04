@@ -148,7 +148,9 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
   const busy = ['analyzing', 'reasoning', 'executing', 'navigating'].includes(task.status);
   const paused = task.status === 'paused';
   const stopped = task.status === 'stopped' || task.status === 'completed';
-  const unsolved = view.questions.some((r) => !r.solution);
+  const unsolved = view.questions.some(
+    (r) => !Object.values(r.responses).some((values) => values.length > 0),
+  );
   const actionable = view.plan.actions.length;
   const hasNext = view.analysis?.next != null;
 

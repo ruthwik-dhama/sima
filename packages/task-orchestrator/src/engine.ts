@@ -68,6 +68,10 @@ export interface EngineDeps {
   onChange?: (taskId: string) => void;
 }
 
+export function hasResponse(record: QuestionRecord): boolean {
+  return Object.values(record.responses).some((values) => values.length > 0);
+}
+
 export function recordId(taskId: string, pageKey: string, questionId: string): string {
   return `${taskId}|${pageKey}|${questionId}`;
 }
@@ -326,7 +330,8 @@ export class TaskEngine {
 
     for (const record of records) {
       if (questionIds && !questionIds.includes(record.question.id)) continue;
-      if (!questionIds && record.solution) continue;
+      // A saved solution with no answer isn't finished, so it gets another try.
+      if (!questionIds && hasResponse(record)) continue;
       // Reload each time so pause and stop take effect between questions.
       task = await this.require(taskId);
       if (task.status !== 'reasoning') return;

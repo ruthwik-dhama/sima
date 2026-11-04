@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { CircleCheck, CircleX, ImageOff, TriangleAlert } from 'lucide-react';
 import { autoFillHold } from '@sima/action-planner';
-import type { ActionRecord, AnswerField, PlanBlocker, QuestionRecord } from '@sima/shared-types';
+import {
+  optionLetter,
+  type ActionRecord,
+  type AnswerField,
+  type FieldOption,
+  type PlanBlocker,
+  type QuestionRecord,
+} from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +26,13 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { useTaskStore } from '@/stores/task-store';
 
+/** Shows the same letter the model uses, so "the answer is: b" can be matched to a choice. */
+function optionText(option: FieldOption, index: number, count: number): string {
+  const letter = optionLetter(index, count);
+  const text = option.label || option.id;
+  return letter ? `${letter}. ${text}` : text;
+}
+
 function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerField }) {
   const run = useTaskStore((s) => s.run);
   const values = record.responses[field.key] ?? [];
@@ -30,7 +44,7 @@ function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerF
   if (field.kind === 'checkbox_group') {
     return (
       <div className="flex flex-col gap-1" data-testid={testId}>
-        {field.options.map((option) => (
+        {field.options.map((option, index) => (
           <label key={option.id} className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={values.includes(option.id)}
@@ -40,7 +54,7 @@ function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerF
                 )
               }
             />
-            {option.label}
+            {optionText(option, index, field.options.length)}
           </label>
         ))}
       </div>
@@ -53,9 +67,9 @@ function FieldEditor({ record, field }: { record: QuestionRecord; field: AnswerF
           <SelectValue placeholder="Choose an option" />
         </SelectTrigger>
         <SelectContent>
-          {field.options.map((option) => (
+          {field.options.map((option, index) => (
             <SelectItem key={option.id} value={option.id}>
-              {option.label || option.id}
+              {optionText(option, index, field.options.length)}
             </SelectItem>
           ))}
         </SelectContent>

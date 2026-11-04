@@ -249,6 +249,60 @@ test.describe('Gradescope mock', () => {
     await expect(panel.getByTestId('held-q3')).toHaveCount(0);
   });
 
+  test('answer letters select choices by position, including several at once', async ({
+    openActivity,
+    model,
+  }) => {
+    const reply = (fieldKey: string, values: string[]) => ({
+      answers: { [fieldKey]: values },
+      explanation: 'x',
+      steps: [],
+      confidence: 0.9,
+      calculations: [],
+      cannotAnswer: false,
+    });
+    model.overrides.push((prompt) => {
+      if (prompt.includes('fieldKey: q1')) return reply('q1', ['b']);
+      if (prompt.includes('fieldKey: q2')) return reply('q2', ['a', 'c']);
+      return undefined;
+    });
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await panel.getByTestId('authorize-fill').click();
+    await panel.getByTestId('auto-fill').click();
+
+    await expect(page.locator('input[name=q1][value=b]')).toBeChecked({ timeout: 15000 });
+    await expect(page.locator('input[name=q2][value=two]')).toBeChecked();
+    await expect(page.locator('input[name=q2][value=eleven]')).toBeChecked();
+    await expect(page.locator('input[name=q2][value=nine]')).not.toBeChecked();
+    await expect(page.locator('input[name=q2][value=fifteen]')).not.toBeChecked();
+    await expect(panel.getByTestId('response-q2')).toContainText('c. 11');
+    expect(model.requests.find((r) => r.includes('fieldKey: q1'))).toContain('b: Displacement');
+  });
+
+  test('a model that only states its answer in the reasoning still fills the choice', async ({
+    openActivity,
+    model,
+  }) => {
+    model.overrides.push((prompt) =>
+      prompt.includes('fieldKey: q1')
+        ? {
+            answers: [],
+            explanation: 'Therefore, the answer is: b',
+            steps: [],
+            confidence: 0.9,
+            calculations: [],
+            cannotAnswer: false,
+          }
+        : undefined,
+    );
+    const { page, panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await panel.getByTestId('authorize-fill').click();
+    await panel.getByTestId('auto-fill').click();
+    await expect(page.locator('input[name=q1][value=b]')).toBeChecked({ timeout: 15000 });
+  });
+
   test('Fill answers enters confident answers in one click, and never submits', async ({
     openActivity,
   }) => {

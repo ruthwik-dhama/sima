@@ -113,3 +113,11 @@ export const PageAnalysisSchema = z.object({
   warnings: z.array(z.string()),
 });
 export type PageAnalysis = z.infer<typeof PageAnalysisSchema>;
+
+const MAX_LETTERED_OPTIONS = 26;
+
+/** Position-based letter for a choice (a = first), or null if a list is too long for letters. */
+export function optionLetter(index: number, optionCount: number): string | null {
+  if (optionCount > MAX_LETTERED_OPTIONS || index < 0 || index >= optionCount) return null;
+  return String.fromCharCode(97 + index);
+}

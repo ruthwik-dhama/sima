@@ -1,9 +1,10 @@
-import type {
-  AnswerField,
-  CheckResult,
-  ModelSolution,
-  Question,
-  ValidatedSolution,
+import {
+  optionLetter,
+  type AnswerField,
+  type CheckResult,
+  type ModelSolution,
+  type Question,
+  type ValidatedSolution,
 } from '@sima/shared-types';
 import {
   countSignificantFigures,
@@ -35,16 +36,57 @@ function normalizeChoice(text: string): string {
     .trim();
 }
 
-/** Models often name a choice by its label despite instructions. Map it, or report no match. */
+function optionAtLetter(field: AnswerField, letter: string): string | null {
+  const index = letter.toLowerCase().charCodeAt(0) - 97;
+  if (optionLetter(index, field.options.length) === null) return null;
+  return field.options[index]?.id ?? null;
+}
+
+/**
+ * Turns what the model said into an option id. The prompt lists choices by letter, so a letter
+ * means that position (b = second) even if a page's own ids happen to be letters in another order.
+ * Ids and labels are accepted too, since models don't always follow instructions.
+ */
 function resolveChoice(field: AnswerField, value: string): string | null {
+  const text = value.trim();
+  const lone = text.match(/^\(?([a-z])\)?[.:)]?$/i)?.[1];
+  if (lone) {
+    const byLetter = optionAtLetter(field, lone);
+    if (byLetter) return byLetter;
+  }
   const exact = field.options.find((o) => o.id === value);
   if (exact) return exact.id;
-  const wanted = value.trim().toLowerCase();
+  const wanted = text.toLowerCase();
   const byId = field.options.find((o) => o.id.toLowerCase() === wanted);
   if (byId) return byId.id;
   const normalized = normalizeChoice(value);
   const byLabel = field.options.filter((o) => normalizeChoice(o.label) === normalized);
-  return byLabel.length === 1 ? (byLabel[0]?.id ?? null) : null;
+  if (byLabel.length === 1) return byLabel[0]?.id ?? null;
+  // Only a clearly marked letter counts, so "a cat" is never read as choice a.
+  const marked =
+    text.match(/^\(?([a-z])[.:)]\s/i)?.[1] ??
+    text.match(/\b(?:answer|option|choice)(?:\s+is)?\s*:?\s*\(?([a-z])\)?[.:)]?\s*$/i)?.[1];
+  return marked ? optionAtLetter(field, marked) : null;
+}
+
+/** Splits "a, c" and "a and c" for select-all fields, when every piece is a real choice. */
+function resolveChoices(field: AnswerField, value: string): Array<string | null> {
+  if (field.kind === 'checkbox_group' && resolveChoice(field, value) === null) {
+    const pieces = value.split(/\s*(?:,|;|&|\band\b)\s*/i).filter((p) => p !== '');
+    const resolved = pieces.map((p) => resolveChoice(field, p));
+    if (pieces.length > 1 && resolved.every((r) => r !== null)) return resolved;
+  }
+  return [resolveChoice(field, value)];
+}
+
+/** Reads "the answer is: b" or "the answers are a and c" from reasoning, using the last mention. */
+function choicesFromReasoning(field: AnswerField, solution: ModelSolution): string[] {
+  const text = [solution.explanation, ...solution.steps].join('\n');
+  const mentions = [...text.matchAll(/\banswers?\s+(?:is|are)\s*:?\s*([^\n]+?)\s*(?:[.\n]|$)/gi)];
+  const last = mentions[mentions.length - 1]?.[1];
+  if (!last) return [];
+  const resolved = resolveChoices(field, last);
+  return resolved.every((r) => r !== null) ? (resolved as string[]) : [];
 }
 
 /**
@@ -68,7 +110,7 @@ export function validateSolution(question: Question, solution: ModelSolution): V
       continue;
     }
     if (field.options.length > 0) {
-      const resolved = answer.values.map((v) => resolveChoice(field, v));
+      const resolved = answer.values.flatMap((v) => resolveChoices(field, v));
       const known = [...new Set(resolved.filter((v): v is string => v !== null))];
       const allKnown = resolved.every((v) => v !== null);
       checks.push(
@@ -91,6 +133,24 @@ export function validateSolution(question: Question, solution: ModelSolution): V
       fieldKey: field.key,
       values: answer.values.map((v) => v.normalize('NFC')).filter((v) => v.trim() !== ''),
     });
+  }
+
+  // The model sometimes reasons its way to a choice and leaves answers empty.
+  const onlyField = question.fields.length === 1 ? question.fields[0] : undefined;
+  if (onlyField && onlyField.options.length > 0) {
+    const entry = answers.find((a) => a.fieldKey === onlyField.key);
+    if (!entry || entry.values.length === 0) {
+      const found = choicesFromReasoning(onlyField, solution);
+      if (found.length > 0) {
+        if (entry) entry.values = found;
+        else answers.push({ fieldKey: onlyField.key, values: found });
+        checks.push({
+          name: 'Choice is on the page',
+          status: 'pass',
+          detail: 'Read from the reasoning, where the model stated its answer',
+        });
+      }
+    }
   }
 
   const computedValues = new Map<string, number>();

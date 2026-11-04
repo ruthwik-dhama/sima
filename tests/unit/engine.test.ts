@@ -364,6 +364,27 @@ describe('one-click fill', () => {
     expect((await store.getQuestion(recordId(task.id, 'p1', 'q1')))?.approved).toBe(false);
   });
 
+  it('tries again on a saved solution that has no answer', async () => {
+    const task = await engine.onPageReady(1, analysis());
+    await engine.authorizeFill(task.id, true);
+    reasoner.complete.mockResolvedValueOnce({ ...solution, answers: [], calculations: [] });
+    reasoner.complete.mockResolvedValueOnce({ ...solution, answers: [], calculations: [] });
+    await engine.solve(task.id);
+    expect((await store.getQuestion(recordId(task.id, 'p1', 'q1')))?.responses).toEqual({});
+
+    await engine.autoFill(task.id);
+    expect(page.execute).toHaveBeenCalledOnce();
+  });
+
+  it('does not re-solve a question that already has a response', async () => {
+    const task = await engine.onPageReady(1, analysis());
+    await engine.authorizeFill(task.id, true);
+    await engine.solve(task.id);
+    reasoner.complete.mockClear();
+    await engine.autoFill(task.id);
+    expect(reasoner.complete).not.toHaveBeenCalled();
+  });
+
   it('does not fill after a pause during solving', async () => {
     const task = await engine.onPageReady(1, analysis());
     await engine.authorizeFill(task.id, true);

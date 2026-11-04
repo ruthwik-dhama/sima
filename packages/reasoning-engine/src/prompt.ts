@@ -1,4 +1,4 @@
-import type { Question } from '@sima/shared-types';
+import { optionLetter, type Question } from '@sima/shared-types';
 
 /**
  * Property order is deliberate. Models write JSON in schema order, so steps and calculations
@@ -53,7 +53,10 @@ export function buildSolutionSchema(question: Question): Readonly<Record<string,
     question.fields.map((field) => {
       const items =
         field.options.length > 0
-          ? { type: 'string', enum: field.options.map((o) => o.id) }
+          ? {
+              type: 'string',
+              enum: field.options.map((o, i) => optionLetter(i, field.options.length) ?? o.id),
+            }
           : { type: 'string' };
       const many = field.kind === 'checkbox_group';
       return [field.key, { type: 'array', items, minItems: 1, ...(many ? {} : { maxItems: 1 }) }];
@@ -85,7 +88,7 @@ Rules:
 - Work in this order: write steps first, then calculations, and only then answers. Reach each answer from your steps.
 - Always give an answer for every field, using the exact fieldKey supplied. Copy your final result from steps into answers.
 - For a fill-in-the-blank, give only the word or words that go in the blank, not the whole sentence.
-- For fields listing options, values must contain option ids, never labels. Radio and select fields take one id; checkbox fields take every correct id.
+- For fields listing options, values must contain the letter of the option, never its text: a is the first choice, b the second, c the third, and so on. Radio and select fields take one letter; checkbox (select all that apply) fields take the letter of every correct choice. Lists too long for letters show an id to use instead.
 - For text fields, values contains one string. Preserve required units, significant figures, precision, and accents and other language-specific characters.
 - Put units in the text only when the question has no separate unit field.
 - For numeric answers, add a plain arithmetic expression to calculations, using numbers and + - * / ^ ( ) sqrt sin cos tan ln log exp abs pi. It must evaluate to the answer before rounding, and Sima will check it.
@@ -100,7 +103,9 @@ function renderTable(table: string[][]): string {
 export function renderQuestion(question: Question, instructions: string): string {
   const fields = question.fields.map((field) => {
     const options = field.options.length
-      ? `\n  options:\n${field.options.map((o) => `    ${o.id}: ${o.label}`).join('\n')}`
+      ? `\n  options:\n${field.options
+          .map((o, i) => `    ${optionLetter(i, field.options.length) ?? o.id}: ${o.label}`)
+          .join('\n')}`
       : '';
     return `- fieldKey: ${field.key}\n  type: ${field.kind}\n  label: ${field.label || '(none)'}${options}`;
   });

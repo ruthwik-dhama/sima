@@ -195,6 +195,94 @@ describe('validateSolution', () => {
   });
 });
 
+describe('answer letters', () => {
+  const options = [
+    { id: 'first', label: 'Speed', target },
+    { id: 'second', label: 'Displacement', target },
+    { id: 'third', label: 'Mass', target },
+  ];
+  const radio: AnswerField = { ...textField, key: 'r', kind: 'radio_group', options };
+  const boxes: AnswerField = { ...textField, key: 'c', kind: 'checkbox_group', options };
+  const solveWith = (field: AnswerField, values: string[], over: Partial<ModelSolution> = {}) =>
+    validateSolution(
+      question({ fields: [field] }),
+      solution({ answers: [{ fieldKey: field.key, values }], ...over }),
+    );
+
+  it.each([
+    ['a', 'first'],
+    ['b', 'second'],
+    ['B', 'second'],
+    ['(b)', 'second'],
+    ['b)', 'second'],
+    ['c.', 'third'],
+    ['the answer is: b', 'second'],
+    ['Option C', 'third'],
+    ['b) Displacement', 'second'],
+    ['Displacement', 'second'],
+    ['second', 'second'],
+  ])('reads %s as the matching choice', (value, id) => {
+    expect(solveWith(radio, [value]).answers[0]?.values).toEqual([id]);
+  });
+
+  it('uses position, even when page ids are letters in another order', () => {
+    const shuffled = [
+      { id: 'c', label: 'One', target },
+      { id: 'a', label: 'Two', target },
+    ];
+    const result = solveWith({ ...radio, options: shuffled }, ['b']);
+    expect(result.answers[0]?.values).toEqual(['a']);
+  });
+
+  it('selects several choices on select-all questions', () => {
+    expect(solveWith(boxes, ['a', 'c']).answers[0]?.values).toEqual(['first', 'third']);
+    expect(solveWith(boxes, ['a, c']).answers[0]?.values).toEqual(['first', 'third']);
+    expect(solveWith(boxes, ['a and b']).answers[0]?.values).toEqual(['first', 'second']);
+  });
+
+  it.each(['d', 'z', 'a cat', 'none of these'])('rejects %s, which is no choice here', (value) => {
+    const result = solveWith(radio, [value]);
+    expect(result.answers[0]?.values).toEqual([]);
+    expect(result.adjustedConfidence).toBeLessThanOrEqual(0.35);
+  });
+
+  it('reads the stated answer from the reasoning when answers are empty', () => {
+    const one = solveWith(radio, [], { explanation: 'Therefore, the answer is: b' });
+    expect(one.answers[0]?.values).toEqual(['second']);
+    const many = solveWith(boxes, [], { steps: ['The answers are a and c.'] });
+    expect(many.answers[0]?.values).toEqual(['first', 'third']);
+  });
+
+  it('uses the last answer it states, and ignores prose that names no choice', () => {
+    const later = solveWith(radio, [], {
+      explanation: 'At first the answer is a. Rechecking, the answer is c.',
+    });
+    expect(later.answers[0]?.values).toEqual(['third']);
+    const prose = solveWith(radio, [], { explanation: 'The answer is not among the options.' });
+    expect(prose.answers[0]?.values).toEqual([]);
+  });
+
+  it('lists choices by letter in the prompt and the schema', () => {
+    const q = question({ fields: [radio] });
+    expect(buildSolvePrompt(q, '').user).toContain('b: Displacement');
+    const schema = buildSolutionSchema(q) as {
+      properties: { answers: { properties: Record<string, { items: { enum: string[] } }> } };
+    };
+    expect(schema.properties.answers.properties.r?.items.enum).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps ids for lists too long for letters', () => {
+    const long = Array.from({ length: 30 }, (_, i) => ({ id: `id${i}`, label: `L${i}` }));
+    const q = question({ fields: [{ ...radio, kind: 'select', options: long }] });
+    expect(buildSolvePrompt(q, '').user).toContain('id29: L29');
+    const result = validateSolution(
+      q,
+      solution({ answers: [{ fieldKey: 'r', values: ['id29'] }] }),
+    );
+    expect(result.answers[0]?.values).toEqual(['id29']);
+  });
+});
+
 describe('solveQuestion', () => {
   const complete = (...replies: unknown[]) => {
     const fn = vi.fn();
@@ -238,7 +326,7 @@ describe('schema', () => {
     expect(schema.properties.answers.properties.r).toMatchObject({
       minItems: 1,
       maxItems: 1,
-      items: { enum: ['x'] },
+      items: { enum: ['a'] },
     });
   });
 
