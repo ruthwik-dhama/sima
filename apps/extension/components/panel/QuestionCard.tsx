@@ -148,7 +148,7 @@ function FieldRow({
           className="flex items-center justify-between gap-2 rounded-md bg-warning-surface p-1.5 text-xs text-warning"
           data-testid={`confirm-${field.key}`}
         >
-          <span>Sima can't tell which blank this is. Check the page before confirming.</span>
+          <span>Sima can't read these choices. Check the page before confirming.</span>
           <Button
             size="sm"
             variant="outline"
@@ -302,24 +302,9 @@ export function QuestionCard({
                 blockers={blockers}
               />
             ))}
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <Checkbox
-                data-testid={`approve-${question.id}`}
-                checked={record.approved}
-                onCheckedChange={(checked) =>
-                  void run({
-                    type: 'SET_APPROVED',
-                    recordId: record.id,
-                    approved: checked === true,
-                  })
-                }
-              />
-              Approve this response
-            </label>
             {solution && !record.approved && autoFillHold(record) && (
               <p className="text-xs text-warning" data-testid={`held-${question.id}`}>
-                Fill answers skips this one: {autoFillHold(record)}. Check it, then approve it to
-                enter it.
+                {autoFillHold(record)}. Type an answer above, then click Fill answers.
               </p>
             )}
             <form
@@ -343,19 +328,6 @@ export function QuestionCard({
               </Button>
             </form>
           </>
-        )}
-        {!solution && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            data-testid={`solve-${question.id}`}
-            onClick={() =>
-              void run({ type: 'SOLVE', taskId: record.taskId, questionIds: [question.id] })
-            }
-          >
-            Work through this one
-          </Button>
         )}
       </CardContent>
     </Card>

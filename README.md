@@ -8,7 +8,7 @@ Sima is an open-source Chrome extension that helps you understand learning activ
 
 - **It never submits work.** Saving and submitting are always yours to do.
 - **It stays off on exams and quizzes.** It also stays off on proctored or timed activities, and on activities that say AI isn't allowed. There's no override.
-- **It doesn't enter anything unasked.** Filling requires you to confirm that AI help is allowed on that activity, then click **Fill answers** or approve individual responses.
+- **It doesn't enter anything unasked.** Filling requires you to confirm that AI help is allowed on that activity, then click **Fill answers**.
 
 You're responsible for following your course's academic integrity policy. If you're unsure whether AI help is allowed, ask your instructor first.
 

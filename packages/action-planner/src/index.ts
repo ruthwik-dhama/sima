@@ -14,6 +14,7 @@ export const MAPPING_CONFIDENCE_THRESHOLD = 0.8;
  */
 export function autoFillHold(record: QuestionRecord): string | null {
   const { solution } = record;
+  if (Object.values(record.responses).some((values) => values.length > 0)) return null;
   if (!solution) return record.solveError ? 'Sima could not solve this' : 'Not solved yet';
   if (!solution.answers.some((a) => a.values.length > 0)) return 'The model gave no answer';
   return null;

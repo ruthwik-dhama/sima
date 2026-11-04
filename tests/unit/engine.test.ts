@@ -396,6 +396,54 @@ describe('one-click fill', () => {
     expect(reasoner.complete).not.toHaveBeenCalled();
   });
 
+  it.each(['pause', 'stop'] as const)('picks a task back up after %s', async (how) => {
+    const task = await engine.onPageReady(1, analysis());
+    await engine.authorizeFill(task.id, true);
+    await engine[how](task.id);
+    await engine.autoFill(task.id);
+    expect(page.execute).toHaveBeenCalledOnce();
+    expect((await store.getTask(task.id))?.status).toBe('review');
+  });
+
+  it('enters an edited response over what Sima entered', async () => {
+    const task = await engine.onPageReady(1, analysis());
+    await engine.authorizeFill(task.id, true);
+    await engine.autoFill(task.id);
+    const filled = analysis({ questions: [question(['4'])] });
+    page.analyze.mockResolvedValue(filled);
+    await engine.onPageReady(1, filled);
+    await engine.editResponse(recordId(task.id, 'p1', 'q1'), 'a', ['5']);
+    page.execute.mockClear();
+    await engine.autoFill(task.id);
+    expect(page.execute).toHaveBeenCalledOnce();
+    expect(page.execute.mock.calls[0]?.[1]).toMatchObject({ value: '5' });
+  });
+
+  it('never replaces what the student typed without being allowed', async () => {
+    const typed = analysis({ questions: [question(['my answer'])] });
+    page.analyze.mockResolvedValue(typed);
+    const task = await engine.onPageReady(1, typed);
+    await engine.authorizeFill(task.id, true);
+    await engine.autoFill(task.id);
+    expect(page.execute).not.toHaveBeenCalled();
+    const view = await engine.view(1);
+    expect(view.plan.blockers[0]?.code).toBe('existing_value');
+    await engine.allowOverwrite(recordId(task.id, 'p1', 'q1'), 'a');
+    await engine.autoFill(task.id);
+    expect(page.execute).toHaveBeenCalledOnce();
+  });
+
+  it('enters an answer the student typed when the model gave none', async () => {
+    reasoner.complete.mockResolvedValue({ ...solution, answers: [], calculations: [] });
+    const task = await engine.onPageReady(1, analysis());
+    await engine.authorizeFill(task.id, true);
+    await engine.autoFill(task.id);
+    expect(page.execute).not.toHaveBeenCalled();
+    await engine.editResponse(recordId(task.id, 'p1', 'q1'), 'a', ['7']);
+    await engine.autoFill(task.id);
+    expect(page.execute.mock.calls[0]?.[1]).toMatchObject({ value: '7' });
+  });
+
   it('does not fill after a pause during solving', async () => {
     const task = await engine.onPageReady(1, analysis());
     await engine.authorizeFill(task.id, true);

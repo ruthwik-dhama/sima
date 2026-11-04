@@ -1,23 +1,6 @@
 import { useEffect, useState } from 'react';
-import {
-  ArrowRight,
-  Pause,
-  PenLine,
-  Play,
-  RefreshCw,
-  ShieldAlert,
-  Sparkles,
-  Square,
-  Zap,
-} from 'lucide-react';
-import type {
-  ActionRecord,
-  PageAnalysis,
-  ProviderId,
-  Settings,
-  Task,
-  TaskView,
-} from '@sima/shared-types';
+import { ShieldAlert, Sparkles, Zap } from 'lucide-react';
+import type { PageAnalysis, ProviderId, Settings, Task, TaskView } from '@sima/shared-types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -86,20 +69,7 @@ export function Disclosure({
       </Alert>
     );
   }
-  if (!provider.external) {
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="provider-note">
-        Using {provider.name}. Question text stays on this computer.
-      </p>
-    );
-  }
-  if (settings.acknowledgedProviders.includes(id)) {
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="provider-note">
-        Question text is sent to {provider.name} when you ask Sima to work through it.
-      </p>
-    );
-  }
+  if (!provider.external || settings.acknowledgedProviders.includes(id)) return null;
   return (
     <Alert data-testid="provider-disclosure">
       <AlertTitle>Question text will go to {provider.name}</AlertTitle>
@@ -144,138 +114,31 @@ export function Authorization({ task }: { task: Task }) {
 
 export function Controls({ view, task }: { view: TaskView; task: Task }) {
   const run = useTaskStore((s) => s.run);
-  const id = task.id;
   const busy = ['analyzing', 'reasoning', 'executing', 'navigating'].includes(task.status);
-  const paused = task.status === 'paused';
-  const stopped = task.status === 'stopped' || task.status === 'completed';
   const unsolved = view.questions.some(
     (r) => !Object.values(r.responses).some((values) => values.length > 0),
   );
-  const actionable = view.plan.actions.length;
-  const hasNext = view.analysis?.next != null;
 
   return (
     <div className="flex flex-wrap gap-1.5" data-testid="controls">
       <Button
         size="sm"
-        variant="outline"
-        disabled={busy || task.tabId === null}
-        onClick={() => task.tabId !== null && void run({ type: 'ANALYZE', tabId: task.tabId })}
+        data-testid="auto-fill"
+        disabled={busy || task.fillAuthorizedAt === null}
+        title={task.fillAuthorizedAt === null ? 'Tick the box above to allow filling' : undefined}
+        onClick={() => void run({ type: 'AUTO_FILL', taskId: task.id })}
       >
-        <RefreshCw /> Re-read page
+        <Zap /> Fill answers
       </Button>
-      {!stopped && !paused && (
-        <>
-          <Button
-            size="sm"
-            data-testid="auto-fill"
-            disabled={busy || task.fillAuthorizedAt === null}
-            title={
-              task.fillAuthorizedAt === null ? 'Tick the box above to allow filling' : undefined
-            }
-            onClick={() => void run({ type: 'AUTO_FILL', taskId: id })}
-          >
-            <Zap /> Fill answers
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="solve-all"
-            disabled={busy || !unsolved}
-            onClick={() => void run({ type: 'SOLVE', taskId: id })}
-          >
-            <Sparkles /> Explain only
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="execute"
-            disabled={busy || actionable === 0 || task.fillAuthorizedAt === null}
-            onClick={() => void run({ type: 'EXECUTE', taskId: id })}
-          >
-            <PenLine /> Enter {actionable > 0 ? `${actionable} ` : ''}approved
-          </Button>
-          {hasNext && (
-            <Button
-              size="sm"
-              variant="outline"
-              data-testid="navigate-next"
-              disabled={busy}
-              onClick={() => void run({ type: 'NAVIGATE_NEXT', taskId: id })}
-            >
-              <ArrowRight /> {view.analysis?.next?.label ?? 'Next page'}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            data-testid="pause"
-            onClick={() => void run({ type: 'PAUSE', taskId: id })}
-          >
-            <Pause /> Pause
-          </Button>
-        </>
-      )}
-      {paused && (
-        <Button
-          size="sm"
-          data-testid="resume"
-          onClick={() => void run({ type: 'RESUME', taskId: id })}
-        >
-          <Play /> Resume
-        </Button>
-      )}
-      {!stopped && (
-        <Button
-          size="sm"
-          variant="outline"
-          data-testid="stop"
-          onClick={() => void run({ type: 'STOP', taskId: id })}
-        >
-          <Square /> Stop
-        </Button>
-      )}
-      {stopped && task.tabId !== null && (
-        <Button
-          size="sm"
-          data-testid="restart"
-          onClick={() => void run({ type: 'RESTART', taskId: id })}
-        >
-          <Play /> Restart
-        </Button>
-      )}
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="solve-all"
+        disabled={busy || !unsolved}
+        onClick={() => void run({ type: 'SOLVE', taskId: task.id })}
+      >
+        <Sparkles /> Explain only
+      </Button>
     </div>
-  );
-}
-
-const ACTION_LABEL: Record<ActionRecord['action']['type'], string> = {
-  fill_text: 'Filled',
-  select_option: 'Selected',
-  select_radio: 'Chose',
-  set_checkbox: 'Toggled',
-  navigate_next: 'Moved to next page',
-};
-
-export function ExecutionLog({ actions }: { actions: ActionRecord[] }) {
-  if (actions.length === 0) return null;
-  return (
-    <details className="rounded-md border p-2 text-xs" data-testid="execution-log">
-      <summary className="cursor-pointer font-medium">Activity log ({actions.length})</summary>
-      <ul className="mt-1 flex flex-col gap-1">
-        {actions.map((record) => (
-          <li key={record.id} data-status={record.status}>
-            <span className={record.status === 'failed' ? 'text-destructive' : 'text-success'}>
-              {record.status === 'failed'
-                ? 'Failed'
-                : record.status === 'verified'
-                  ? 'Verified'
-                  : 'Started'}
-            </span>{' '}
-            {ACTION_LABEL[record.action.type]} {record.action.fieldKey}
-            {record.result?.detail ? `: ${record.result.detail}` : ''}
-          </li>
-        ))}
-      </ul>
-    </details>
   );
 }

@@ -76,12 +76,12 @@ export function detectFields(container: Element, questionId: string): AnswerFiel
             : 'contenteditable';
     const label = explicitLabel(el);
     const scoped = totalControls === 1;
-    const confidence = label ? (scoped ? 0.99 : 0.95) : scoped ? 0.92 : 0.45;
+    const confidence = label ? (scoped ? 0.99 : 0.95) : scoped ? 0.92 : 0.85;
     const reason = label
       ? 'Control has an explicit label inside the question'
       : scoped
         ? 'Only control inside the question'
-        : 'Several unlabeled controls in this question: position alone cannot identify the blank';
+        : 'Unlabeled blank, placed by where it sits in the question';
     const options: FieldOption[] =
       kind === 'select'
         ? Array.from((el as HTMLSelectElement).options)

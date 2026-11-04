@@ -88,7 +88,13 @@ it(`accuracy of ${MODEL}`, { timeout: 1_800_000 }, async () => {
           provider.completeStructured({ ...prompt, schema, schemaName, model: MODEL }),
         );
         confidence = solution.adjustedConfidence;
-        held = autoFillHold({ question, solution, solveError: null } as QuestionRecord) !== null;
+        held =
+          autoFillHold({
+            question,
+            solution,
+            solveError: null,
+            responses: {},
+          } as unknown as QuestionRecord) !== null;
         answers = Object.fromEntries(solution.answers.map((a) => [a.fieldKey, a.values]));
         solved++;
       } catch {

@@ -139,7 +139,7 @@ test.describe('restricted assessments', () => {
       await status(panel, 'blocked_restricted');
       await expect(panel.getByTestId('restricted-notice')).toBeVisible();
       await expect(panel.getByTestId('solve-all')).toHaveCount(0);
-      await expect(panel.getByTestId('execute')).toHaveCount(0);
+      await expect(panel.getByTestId('auto-fill')).toHaveCount(0);
       await expect(page.getByTestId('sima-floating-status')).toContainText('Not available');
       expect(model.requests).toEqual([]);
     });
@@ -147,7 +147,7 @@ test.describe('restricted assessments', () => {
 });
 
 test.describe('Gradescope mock', () => {
-  test('full flow: review, edit, approve, fill, verify, never submit', async ({
+  test('full flow: explain, fill, edit, fill again, verify, never submit', async ({
     openActivity,
     model,
   }) => {
@@ -163,6 +163,7 @@ test.describe('Gradescope mock', () => {
     await expect(
       panel.getByTestId('checks-q3').locator('[data-check="pass"]').first(),
     ).toContainText('3^4 + 12');
+    await expect(page.locator('input[name=q3]')).toHaveValue('');
 
     // Hidden injection text never reached the model.
     const q4 = model.requests.find((r) => r.includes('dropped ball')) ?? '';
@@ -172,38 +173,49 @@ test.describe('Gradescope mock', () => {
     await expect(panel.getByTestId('injection-q4')).toContainText('banana');
 
     // Filling is locked until the user authorizes it for this activity.
-    await panel.getByTestId('approve-q1').click();
-    await expect(panel.getByTestId('execute')).toBeDisabled();
+    await expect(panel.getByTestId('auto-fill')).toBeDisabled();
     await panel.getByTestId('authorize-fill').click();
-
-    // The user's edit is what gets entered.
-    await panel.getByTestId('response-q3').fill('94');
-    await panel.getByTestId('response-q3').blur();
-    await panel.getByTestId('approve-q2').click();
-    await panel.getByTestId('approve-q3').click();
-    await panel.getByTestId('approve-q4').click();
-    await panel.getByTestId('approve-q5').click();
-    await expect(panel.getByTestId('execute')).toContainText('Enter');
-    await expect(panel.getByTestId('execute')).toBeEnabled();
-    await panel.getByTestId('execute').click();
-
+    await panel.getByTestId('auto-fill').click();
     await expect(panel.getByTestId('field-state-q3')).toContainText('Entered', { timeout: 15000 });
     await status(panel, 'review');
+
     await expect(page.locator('input[name=q1][value=b]')).toBeChecked();
     await expect(page.locator('input[name=q2][value=two]')).toBeChecked();
     await expect(page.locator('input[name=q2][value=eleven]')).toBeChecked();
     await expect(page.locator('input[name=q2][value=nine]')).not.toBeChecked();
-    await expect(page.locator('input[name=q3]')).toHaveValue('94');
+    await expect(page.locator('input[name=q3]')).toHaveValue('93');
     await expect(page.locator('textarea[name=q4]')).toHaveValue(/Gravity/);
     await expect(page.locator('input[name=q5]')).toHaveValue('2.2');
-    expect(await page.evaluate(() => document.body.dataset.submitted)).toBeUndefined();
     await expect(panel.getByTestId('page-position')).toContainText('5 of 5 answered');
+
+    // An edit is what gets entered next, replacing Sima's own earlier entry.
+    await panel.getByTestId('response-q3').fill('94');
+    await panel.getByTestId('response-q3').blur();
+    await panel.getByTestId('auto-fill').click();
+    await expect(page.locator('input[name=q3]')).toHaveValue('94', { timeout: 15000 });
+    expect(await page.evaluate(() => document.body.dataset.submitted)).toBeUndefined();
+  });
+
+  test('the panel shows only the two main buttons', async ({ openActivity }) => {
+    const { panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    await expect(panel.getByTestId('controls').getByRole('button')).toHaveText([
+      'Fill answers',
+      'Explain only',
+    ]);
+    await panel.getByTestId('authorize-fill').click();
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('field-state-q3')).toContainText('Entered', { timeout: 15000 });
+    await status(panel, 'review');
+    await expect(panel.getByText('Activity log')).toHaveCount(0);
+    await expect(panel.getByText('stays on this computer')).toHaveCount(0);
+    await expect(panel.getByText('Approve this response')).toHaveCount(0);
   });
 
   test('follow-up questions get answered in place', async ({ openActivity }) => {
     const { panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q1').click();
+    await panel.getByTestId('solve-all').click();
     await status(panel, 'review');
     await panel.getByTestId('follow-up-q1').fill('Explain it another way');
     await panel.getByTestId('follow-up-q1').press('Enter');
@@ -219,7 +231,7 @@ test.describe('Gradescope mock', () => {
     );
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q1').click();
+    await panel.getByTestId('solve-all').click();
     await expect(panel.getByTestId('solve-error-q1')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('input[name=q1]:checked')).toHaveCount(0);
   });
@@ -242,7 +254,7 @@ test.describe('Gradescope mock', () => {
     );
     const { panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q3').click();
+    await panel.getByTestId('solve-all').click();
     await expect(panel.getByTestId('confidence-q3')).toContainText('60%', { timeout: 15000 });
     await expect(panel.getByTestId('response-q3')).toHaveValue('93');
     await expect(panel.getByTestId('checks-q3')).toContainText('Corrected');
@@ -353,112 +365,86 @@ test.describe('Gradescope mock', () => {
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
     await page.locator('input[name=q3]').fill('my own answer');
-    await panel.getByRole('button', { name: 'Re-read page' }).click();
-    await status(panel, 'ready');
     await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('solve-q3').click();
+    await panel.getByTestId('auto-fill').click();
+    await expect(panel.getByTestId('overwrite-q3')).toBeVisible({ timeout: 15000 });
     await status(panel, 'review');
-    await panel.getByTestId('approve-q3').click();
-    await expect(panel.getByTestId('overwrite-q3')).toBeVisible();
-    await expect(panel.getByTestId('execute')).toBeDisabled();
     await expect(page.locator('input[name=q3]')).toHaveValue('my own answer');
     await panel.getByTestId('overwrite-q3').getByRole('button').click();
-    await expect(panel.getByTestId('execute')).toBeEnabled();
-    await panel.getByTestId('execute').click();
+    await panel.getByTestId('auto-fill').click();
     await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
   });
 });
 
 test.describe('VHL mock', () => {
-  test('moves through a client-rendered activity and keeps accents', async ({ openActivity }) => {
+  test('follows the page through a client-rendered activity and keeps accents', async ({
+    openActivity,
+  }) => {
     const { page, panel } = await openActivity('/vhl/activity.html?page=1');
     await status(panel, 'ready');
     await expect(panel.getByTestId('activity-title')).toHaveText('Lección 3: Completar');
     await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('solve-all').click();
-    await status(panel, 'review');
-    await panel.getByTestId('approve-page-1-i1').click();
-    await panel.getByTestId('approve-page-1-i2').click();
-    await panel.getByTestId('execute').click();
+    await panel.getByTestId('auto-fill').click();
     await expect(page.locator('input[name=p1i2]')).toHaveValue('vivió', { timeout: 15000 });
     await status(panel, 'review');
 
-    await panel.getByTestId('navigate-next').click();
+    // The student moves on with the page's own button, and Sima follows.
+    await page.locator('[data-vhl-next]').click();
     await expect(panel.getByTestId('page-position')).toContainText('Page 2 of 3', {
       timeout: 15000,
     });
     await status(panel, 'ready');
-    await expect(page.locator('select[name=m1]')).toBeVisible();
-
-    await panel.getByTestId('solve-all').click();
-    await status(panel, 'review');
-    await panel.getByTestId('approve-page-2-i1').click();
-    await panel.getByTestId('approve-page-2-i2').click();
-    await panel.getByTestId('execute').click();
+    await panel.getByTestId('auto-fill').click();
     await expect(page.locator('select[name=m1]')).toHaveValue('apple', { timeout: 15000 });
     await expect(page.locator('select[name=m2]')).toHaveValue('book');
     await expect(page.locator('select[name=art]')).toHaveValue('la');
     await status(panel, 'review');
 
-    await panel.getByTestId('navigate-next').click();
+    await page.locator('[data-vhl-next]').click();
     await expect(panel.getByTestId('page-position')).toContainText('Page 3 of 3', {
       timeout: 15000,
     });
     await status(panel, 'ready');
-    // Only Submit remains on the last page, and Sima offers no way to press it.
-    await expect(panel.getByTestId('navigate-next')).toHaveCount(0);
   });
 });
 
 test.describe('WebAssign mock', () => {
-  test('handles units, a controlled input, full page loads and ambiguous blanks', async ({
+  test('handles units, a controlled input, full page loads and unlabeled blanks', async ({
     openActivity,
+    model,
   }) => {
     const { page, panel } = await openActivity('/webassign/assignment.html?q=1');
     await status(panel, 'ready');
     await panel.getByTestId('authorize-fill').click();
-    await panel.getByTestId('solve-all').click();
-    await status(panel, 'review');
-    await expect(
-      panel.getByTestId('checks-question-1-p1').locator('[data-check="fail"]'),
-    ).toHaveCount(0);
-    await panel.getByTestId('approve-question-1-p1').click();
-    await panel.getByTestId('execute').click();
+    await panel.getByTestId('auto-fill').click();
     await expect(page.locator('input[name=speed]')).toHaveValue('12.5', { timeout: 15000 });
     await expect(page.locator('select[name=speed_unit]')).toHaveValue('m/s');
     await status(panel, 'review');
 
-    await panel.getByTestId('navigate-next').click();
+    await page.locator('[data-wa-next]').click();
     await expect(panel.getByTestId('page-position')).toContainText('Page 2 of 3', {
       timeout: 15000,
     });
     await status(panel, 'ready');
-    await panel.getByTestId('solve-all').click();
-    await status(panel, 'review');
-    await panel.getByTestId('approve-question-2-p1').click();
-    await panel.getByTestId('approve-question-2-p2').click();
-    await panel.getByTestId('execute').click();
+    await panel.getByTestId('auto-fill').click();
     await expect(panel.getByTestId('field-state-ke')).toContainText('Entered', { timeout: 15000 });
     // The mock's controlled input wipes values not set through real input events.
     await page.waitForTimeout(200);
     await expect(page.locator('input[name=ke]')).toHaveValue('9');
     await status(panel, 'review');
 
-    await panel.getByTestId('navigate-next').click();
+    await page.locator('[data-wa-next]').click();
     await expect(panel.getByTestId('page-position')).toContainText('Page 3 of 3', {
       timeout: 15000,
     });
     await status(panel, 'ready');
-    await panel.getByTestId('solve-all').click();
-    await status(panel, 'review');
-    await panel.getByTestId('approve-question-3-p1').click();
-    await expect(panel.getByTestId('confirm-blank_a')).toBeVisible();
-    await expect(panel.getByTestId('execute')).toBeDisabled();
-    await panel.getByTestId('confirm-blank_a').getByRole('button').click();
-    await panel.getByTestId('confirm-blank_b').getByRole('button').click();
-    await expect(panel.getByTestId('execute')).toBeEnabled();
-    await panel.getByTestId('execute').click();
-    await expect(page.locator('input[name=blank_b]')).toHaveValue('3', { timeout: 15000 });
+    await panel.getByTestId('auto-fill').click();
+
+    // Unlabeled blanks fill without asking, with their place marked for the model.
+    await expect(page.locator('input[name=blank_a]')).toHaveValue('2', { timeout: 15000 });
+    await expect(page.locator('input[name=blank_b]')).toHaveValue('3');
+    await expect(panel.getByTestId('confirm-blank_a')).toHaveCount(0);
+    expect(model.requests.at(-1)).toContain('[blank_a] and [blank_b]');
     expect(await page.evaluate(() => document.body.dataset.submitted)).toBeUndefined();
   });
 });
@@ -467,14 +453,16 @@ test.describe('persistence and recovery', () => {
   test('work survives a page reload', async ({ openActivity }) => {
     const { page, panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q1').click();
+    await panel.getByTestId('solve-all').click();
     await status(panel, 'review');
-    await panel.getByTestId('approve-q1').click();
-    await expect(panel.getByTestId('approve-q1')).toBeChecked();
+    await panel.getByTestId('response-q3').fill('edited');
+    await panel.getByTestId('response-q3').blur();
+    await expect(panel.getByTestId('response-q3')).toHaveValue('edited');
+    await panel.getByTestId('explanation-q1').click();
     await page.reload();
     await status(panel, 'review');
     await panel.reload();
-    await expect(panel.getByTestId('approve-q1')).toBeChecked();
+    await expect(panel.getByTestId('response-q3')).toHaveValue('edited');
     await expect(panel.getByTestId('explanation-q1')).toBeVisible();
   });
 
@@ -485,7 +473,7 @@ test.describe('persistence and recovery', () => {
   }) => {
     const { panel } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q1').click();
+    await panel.getByTestId('solve-all').click();
     await status(panel, 'review');
 
     const cdp = await context
@@ -506,24 +494,19 @@ test.describe('persistence and recovery', () => {
     await expect(panel.getByTestId('authorize-fill')).toBeChecked();
   });
 
-  test('pause holds across a reload and resume returns to review', async ({ openActivity }) => {
-    const { page, panel } = await openActivity('/gradescope/assignment.html');
+  test('Fill answers picks a stopped task back up', async ({ openActivity }) => {
+    const { page, panel, tabId } = await openActivity('/gradescope/assignment.html');
     await status(panel, 'ready');
-    await panel.getByTestId('solve-q1').click();
-    await status(panel, 'review');
-    await panel.getByTestId('pause').click();
-    await status(panel, 'paused');
-    await page.reload();
-    await page.waitForTimeout(800);
-    await status(panel, 'paused');
-    await panel.getByTestId('resume').click();
-    await status(panel, 'review');
-    await panel.getByTestId('stop').click();
+    await panel.evaluate(async (id) => {
+      const view = await chrome.runtime.sendMessage({ type: 'GET_VIEW', tabId: id });
+      await chrome.runtime.sendMessage({ type: 'STOP', taskId: view.data.task.id });
+    }, tabId);
+    await panel.reload();
     await status(panel, 'stopped');
-    await expect(panel.getByTestId('execute')).toHaveCount(0);
-    await panel.getByTestId('restart').click();
+    await panel.getByTestId('authorize-fill').click();
+    await panel.getByTestId('auto-fill').click();
+    await expect(page.locator('input[name=q3]')).toHaveValue('93', { timeout: 15000 });
     await status(panel, 'review');
-    await expect(panel.getByTestId('explanation-q1')).toBeVisible();
   });
 
   test('deleting data removes saved work', async ({ context, extensionId, openActivity }) => {
@@ -593,7 +576,6 @@ test('the panel leads a new user to settings, and updates once a model is set', 
   await panel.getByTestId('model').fill('fake-model');
   await panel.getByTestId('settings-toggle').click();
   await expect(panel.getByTestId('model-missing')).toHaveCount(0);
-  await expect(panel.getByTestId('provider-note')).toBeVisible();
 
   // The gear reaches them too, including with no supported activity on the tab.
   const empty = await context.newPage();

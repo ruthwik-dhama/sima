@@ -48,7 +48,12 @@ export function isHidden(el: Element): boolean {
 }
 
 /** Visible text of a subtree, keeping exponents and subscripts meaningful. */
-export function visibleText(root: Element, exclude?: (el: Element) => boolean): string {
+export function visibleText(
+  root: Element,
+  exclude?: (el: Element) => boolean,
+  /** Text to place where a control sits, so its position in a sentence isn't lost. */
+  markers?: Map<Element, string>,
+): string {
   const parts: string[] = [];
   const walk = (node: Node): void => {
     if (node.nodeType === 3) {
@@ -57,6 +62,11 @@ export function visibleText(root: Element, exclude?: (el: Element) => boolean): 
     }
     if (node.nodeType !== 1) return;
     const el = node as Element;
+    const marker = markers?.get(el);
+    if (marker) {
+      parts.push(` ${marker} `);
+      return;
+    }
     if (SKIP_TAGS.has(el.tagName) || isHidden(el) || exclude?.(el)) return;
     const tag = el.tagName.toLowerCase();
     if (tag === 'math') {

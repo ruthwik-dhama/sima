@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { SettingsPage } from '@/components/SettingsPage';
 import { useTaskStore } from '@/stores/task-store';
-import { Authorization, Controls, Disclosure, ExecutionLog, Restricted } from './Sections';
+import { Authorization, Controls, Disclosure, Restricted } from './Sections';
 import { QuestionCard } from './QuestionCard';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -156,7 +156,6 @@ export function App() {
                     blockers={view.plan.blockers}
                   />
                 ))}
-                <ExecutionLog actions={view.actions} />
               </>
             )
           )}

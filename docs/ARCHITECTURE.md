@@ -30,7 +30,7 @@ The stages are kept apart on purpose. Reasoning produces values for known field 
 
 ## Field mapping
 
-`detectFields` scores each control. An explicit label scores 0.95 or higher, and a lone control in a question 0.92. Several unlabeled controls score 0.45. Below 0.8, the planner returns a blocker until the user confirms. Sima doesn't guess from position.
+`detectFields` scores each control. An explicit label scores 0.95 or higher, and a lone control in a question 0.92. Several unlabeled blanks score 0.85: each is marked in the question text (`[blank_a]`), so the model places answers using the words around it. Choices with unreadable labels score 0.4, and below 0.8 the planner returns a blocker until the user confirms.
 
 ## Actions and verification
 

@@ -34,12 +34,25 @@ export function extractImages(root: Element): Array<{ src: string; alt: string }
 
 /** Builds a Question from one question container. Platform adapters choose the containers. */
 export function extractQuestion(container: Element, options: QuestionExtractionOptions): Question {
-  const promptRoot = options.promptEl ?? container;
-  const prompt = visibleText(promptRoot, (el) => {
-    if (el.tagName === 'TABLE' || el.tagName === 'LABEL') return true;
-    return options.excludeFromPrompt?.(el) ?? false;
-  });
   const fields = detectFields(container, options.id);
+  // Unlabeled blanks are identified by where they sit, so mark that in the question text.
+  const blanks = fields.filter((f) => !f.label && f.options.length === 0);
+  const markers = new Map<Element, string>();
+  if (blanks.length > 1) {
+    for (const blank of blanks) {
+      const el = container.ownerDocument.querySelector(blank.target.selector);
+      if (el) markers.set(el, `[${blank.key}]`);
+    }
+  }
+  const promptRoot = options.promptEl ?? container;
+  const prompt = visibleText(
+    promptRoot,
+    (el) => {
+      if (el.tagName === 'TABLE' || el.tagName === 'LABEL') return true;
+      return options.excludeFromPrompt?.(el) ?? false;
+    },
+    markers,
+  );
   return {
     id: options.id,
     pageKey: options.pageKey,

@@ -88,6 +88,7 @@ Rules:
 - Work in this order: write steps first, then calculations, and only then answers. Reach each answer from your steps.
 - Always give an answer for every field, using the exact fieldKey supplied. Copy your final result from steps into answers.
 - For a fill-in-the-blank, give only the word or words that go in the blank, not the whole sentence.
+- A [fieldKey] in the question text marks where that blank sits. Use the words around it to decide what goes in each blank. When order doesn't matter, such as the roots of an equation, give each correct value once, in any order.
 - Follow any length or format the question asks for, such as "in two sentences".
 - For fields listing options, values must contain the letter of the option, never its text: a is the first choice, b the second, c the third, and so on. Radio and select fields take one letter; checkbox (select all that apply) fields take the letter of every correct choice. Lists too long for letters show an id to use instead.
 - For text fields, values contains one string. Preserve required units, significant figures, precision, and accents and other language-specific characters.

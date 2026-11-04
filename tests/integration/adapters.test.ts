@@ -130,11 +130,12 @@ describe('WebAssign mock', () => {
     expect(fields.every((f) => f.mappingConfidence >= 0.8)).toBe(true);
   });
 
-  it('marks unlabeled sibling blanks as ambiguous', async () => {
+  it('marks where unlabeled blanks sit in the question', async () => {
     const { analysis } = await analyze('/webassign/assignment.html?q=3');
-    const fields = analysis.questions[0]!.fields;
-    expect(fields).toHaveLength(2);
-    expect(fields.every((f) => f.mappingConfidence < 0.8)).toBe(true);
+    const question = analysis.questions[0]!;
+    expect(question.fields).toHaveLength(2);
+    expect(question.fields.every((f) => f.mappingConfidence >= 0.8)).toBe(true);
+    expect(question.prompt).toContain('[blank_a] and [blank_b]');
   });
 
   it('does not offer Submit Assignment as a next control on the last page', async () => {

@@ -23,6 +23,7 @@ const RETRYABLE: ActionFailure[] = [
 ];
 const IN_FLIGHT: TaskStatus[] = ['analyzing', 'reasoning', 'executing', 'navigating'];
 const BUSY: TaskStatus[] = ['reasoning', 'executing', 'navigating'];
+const REOPENABLE: TaskStatus[] = ['paused', 'stopped', 'completed', 'error'];
 
 /** Persistence port. Every state change is written before Sima acts on it. */
 export interface TaskStore {
@@ -66,6 +67,32 @@ export interface EngineDeps {
   now?: () => number;
   newId?: () => string;
   onChange?: (taskId: string) => void;
+}
+
+/** Fields holding only what Sima entered. Replacing those can't lose anything the student typed. */
+function fieldsEnteredBySima(record: QuestionRecord, journal: ActionRecord[]): string[] {
+  return record.question.fields
+    .filter((field) => {
+      const entered = journal
+        .filter(
+          (entry) =>
+            entry.status === 'verified' &&
+            entry.action.questionId === record.question.id &&
+            entry.action.fieldKey === field.key,
+        )
+        .flatMap(({ action }) => {
+          if (action.type === 'fill_text') return [action.value];
+          if (action.type === 'select_option') return [action.optionValue];
+          if (action.type === 'select_radio' || action.type === 'set_checkbox') {
+            return [action.optionId];
+          }
+          return [];
+        });
+      return (
+        field.currentValues.length > 0 && field.currentValues.every((v) => entered.includes(v))
+      );
+    })
+    .map((field) => field.key);
 }
 
 export function hasResponse(record: QuestionRecord): boolean {
@@ -304,7 +331,9 @@ export class TaskEngine {
   async restart(taskId: string): Promise<void> {
     const task = await this.require(taskId);
     const next = await this.setStatus(task, 'analyzing', { error: null });
-    if (next.tabId !== null) await this.analyze(next.tabId);
+    const analyzed = next.tabId !== null ? await this.analyze(next.tabId) : null;
+    // Without a readable page there's nothing to re-scan, but saved work is still usable.
+    if (!analyzed) await this.setStatus(next, 'review', {}, ['analyzing']);
   }
 
   async authorizeFill(taskId: string, authorized: boolean): Promise<void> {
@@ -321,6 +350,11 @@ export class TaskEngine {
 
   async solve(taskId: string, questionIds?: string[]): Promise<void> {
     let task = await this.require(taskId);
+    // Asking for answers picks a paused, stopped or failed task back up.
+    if (REOPENABLE.includes(task.status)) {
+      await this.restart(taskId);
+      task = await this.require(taskId);
+    }
     if (task.status === 'blocked_restricted')
       throw new Error('This activity is restricted, so Sima will not reason about it.');
     await this.reasoner.assertReady();
@@ -374,11 +408,22 @@ export class TaskEngine {
       throw new Error('Confirm that this activity permits automated assistance before filling.');
     }
     await this.solve(taskId);
-    if ((await this.require(taskId)).status !== 'review') return;
-    for (const record of await this.store.getQuestions(taskId, task.currentPageKey)) {
-      if (autoFillHold(record) === null) {
-        await this.updateRecord(record.id, (latest) => ({ ...latest, approved: true }));
-      }
+    const solved = await this.require(taskId);
+    if (solved.status !== 'review') return;
+    // Read the boxes now, so an answer typed since the last read counts as the student's own.
+    if (solved.tabId !== null) {
+      const analysis = await this.page.analyze(solved.tabId);
+      if (analysis?.pageKey === solved.currentPageKey) await this.refreshFields(taskId, analysis);
+    }
+    const journal = await this.store.getActions(taskId);
+    for (const record of await this.store.getQuestions(taskId, solved.currentPageKey)) {
+      if (autoFillHold(record) !== null) continue;
+      const own = fieldsEnteredBySima(record, journal);
+      await this.updateRecord(record.id, (latest) => ({
+        ...latest,
+        approved: true,
+        overwriteFields: [...new Set([...latest.overwriteFields, ...own])],
+      }));
     }
     this.onChange(taskId);
     await this.execute(taskId);
