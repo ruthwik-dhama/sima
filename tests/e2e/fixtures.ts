@@ -23,6 +23,11 @@ export interface FakeModel {
   /** What Ollama reports as installed. Tests change it to act like a fresh install. */
   installed: string[];
   pulled: string[];
+  /** Act like a default Ollama, which refuses any request carrying an extension's origin. */
+  refuseExtensions?: boolean;
+  /** How long a model download takes, and whether it ends in an error. */
+  pullDelayMs?: number;
+  pullFails?: boolean;
 }
 
 function keysIn(prompt: string): string[] {
@@ -107,20 +112,29 @@ function startFakeModel(model: FakeModel): Promise<Server> {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
+      if (model.refuseExtensions && req.headers.origin?.startsWith('chrome-extension://')) {
+        res.statusCode = 403;
+        return res.end();
+      }
       res.setHeader('content-type', 'application/json');
+      if (req.url === '/api/show') {
+        res.statusCode = 400;
+        return res.end('{"error":"model is required"}');
+      }
       if (req.url === '/api/tags')
         return res.end(JSON.stringify({ models: model.installed.map((name) => ({ name })) }));
       if (req.url === '/api/pull') {
         const name = (JSON.parse(body) as { model: string }).model;
-        model.pulled.push(name);
         res.write('{"status":"pulling manifest"}\n');
+        if (model.pullFails) return res.end('{"error":"no space left on device"}\n');
+        model.pulled.push(name);
         res.write('{"status":"pulling a","digest":"a","total":100,"completed":40}\n');
         return setTimeout(() => {
           model.installed.push(name);
           res.end(
             '{"status":"pulling a","digest":"a","total":100,"completed":100}\n{"status":"success"}\n',
           );
-        }, 300);
+        }, model.pullDelayMs ?? 300);
       }
       const parsed = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
       const prompt = parsed.messages.find((m) => m.role === 'user')?.content ?? '';
@@ -157,6 +171,8 @@ export const test = base.extend<Fixtures>({
     };
     const server = await startFakeModel(model);
     await use(model);
+    // Setup keeps polling Ollama, so open keep-alive connections would hold close() forever.
+    server.closeAllConnections();
     await new Promise((r) => server.close(r));
   },
   context: async ({}, use) => {
@@ -184,9 +200,6 @@ export const test = base.extend<Fixtures>({
     void model;
     const settings = await context.newPage();
     await settings.goto(`chrome-extension://${extensionId}/options.html`);
-    await setBirthDate(settings, MINOR_BIRTH_DATE);
-    await settings.reload();
-    await settings.getByTestId('local-manual').click();
     await settings.getByTestId('ollama-url').fill(`http://127.0.0.1:${OLLAMA_PORT}`);
     await settings.getByTestId('model').fill('fake-model');
     await settings.close();
@@ -231,15 +244,4 @@ export async function openRow(panel: Page, questionId: string) {
   const row = panel.getByTestId(`question-${questionId}`);
   if ((await row.getAttribute('open')) === null)
     await panel.getByTestId(`row-${questionId}`).click();
-}
-
-/** Dates relative to any test run: a child, and someone well past 18. */
-export const MINOR_BIRTH_DATE = `${new Date().getFullYear() - 10}-01-15`;
-export const ADULT_BIRTH_DATE = `${new Date().getFullYear() - 30}-01-15`;
-
-export function setBirthDate(page: Page, birthDate: string) {
-  return page.evaluate(
-    (date) => chrome.runtime.sendMessage({ type: 'SET_BIRTH_DATE', birthDate: date }),
-    birthDate,
-  );
 }

@@ -1,120 +1,103 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  chooseDefaultOllamaModel,
-  pullOllamaModel,
-  RECOMMENDED_OLLAMA_MODEL,
-} from '@sima/model-providers';
-import type { Settings } from '@sima/shared-types';
+  MODEL_DOWNLOAD_KEY,
+  ModelDownloadSchema,
+  type ModelDownload,
+  type OllamaStatus,
+} from '@sima/shared-types';
 import { Download, ExternalLink, LoaderCircle } from 'lucide-react';
-import { SetupDone } from '@/components/GeminiSetup';
+import { OllamaAccess } from '@/components/OllamaAccess';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { sendCommand } from '@/services/messaging';
-import { originPattern, providerOrigin } from '@/services/reasoner';
 
 const OLLAMA_DOWNLOAD_URL = 'https://ollama.com/download';
+/** How often to look for Ollama while the user installs, opens or restarts it. */
+const POLL_MS = 3000;
+/** The background writes at least every 10 seconds while downloading, so silence means it stopped. */
+const STALE_MS = 45_000;
 
-function plainError(error: unknown): string {
-  const message = error instanceof Error ? error.message : '';
-  if (/\b403\b/.test(message)) {
-    return "Your version of Ollama can't talk to Sima. Download the newest version, install it, then try again.";
-  }
-  return "Sima can't find Ollama yet. Make sure it's installed and open, then try again.";
+async function readDownload(): Promise<ModelDownload | null> {
+  const stored = await chrome.storage.local.get(MODEL_DOWNLOAD_KEY);
+  const parsed = ModelDownloadSchema.safeParse(stored[MODEL_DOWNLOAD_KEY]);
+  return parsed.success ? parsed.data : null;
 }
 
-type Stage = 'install' | 'checking' | 'model' | 'downloading' | 'done';
+/**
+ * Local AI setup, used as onboarding in the dropdown and in Settings. It finds Ollama by itself,
+ * so the user only installs it, allows Sima if Ollama asks, and starts the model download.
+ * Settings change once a model is ready, and whoever shows this then moves on.
+ */
+export function LocalSetup() {
+  const [ollama, setOllama] = useState<OllamaStatus['status'] | 'looking'>('looking');
+  const [download, setDownload] = useState<ModelDownload | null>(null);
+  const [now, setNow] = useState(Date.now());
 
-/** First-run local model setup, with no Terminal needed. */
-export function LocalSetup({
-  settings,
-  onDone,
-  onManual,
-}: {
-  settings: Settings;
-  onDone: () => Promise<void>;
-  onManual: () => void;
-}) {
-  const [stage, setStage] = useState<Stage>('install');
-  const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
+  const check = useCallback(async () => {
+    const result = await sendCommand<OllamaStatus>({ type: 'CHECK_OLLAMA' }).catch(() => null);
+    setOllama(result?.status ?? 'not_running');
+  }, []);
 
-  const useModel = async (model: string) => {
-    const { settings: latest } = await sendCommand<{ settings: Settings }>({
-      type: 'GET_SETTINGS',
-    });
-    await sendCommand({
-      type: 'SAVE_SETTINGS',
-      settings: { ...latest, models: { ...latest.models, ollama: model } },
-    });
-    setStage('done');
+  useEffect(() => {
+    void readDownload().then(setDownload);
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if (MODEL_DOWNLOAD_KEY in changes) void readDownload().then(setDownload);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
+  const running = download?.state === 'running' && now - download.updatedAt < STALE_MS;
+  // Once Ollama answers, an old refusal from a download no longer applies.
+  const blocked = ollama === 'blocked' || (download?.state === 'blocked' && ollama !== 'ready');
+  const stopped = download !== null && !running;
+
+  // Keep looking until Ollama answers, so installing or restarting it moves setup along.
+  useEffect(() => {
+    void check();
+    if (ollama === 'ready' && !blocked) return;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      void check();
+    }, POLL_MS);
+    return () => clearInterval(timer);
+  }, [check, ollama, blocked]);
+
+  // While downloading, only the clock needs to move, to notice a download that died.
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setNow(Date.now()), POLL_MS);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  const startDownload = async () => {
+    setNow(Date.now());
+    await sendCommand({ type: 'DOWNLOAD_MODEL' });
   };
-
-  const check = async () => {
-    setError(null);
-    // Permission prompts need the click itself, so this request comes first.
-    const origins = [originPattern(providerOrigin('ollama', settings))];
-    const granted = await chrome.permissions.request({ origins }).catch(() => false);
-    if (!granted) {
-      setError("Sima can't reach Ollama unless you click Allow when Chrome asks.");
-      return;
-    }
-    setStage('checking');
-    try {
-      const found = await sendCommand<string[]>({ type: 'TEST_PROVIDER', provider: 'ollama' });
-      const model = chooseDefaultOllamaModel(found);
-      if (model) await useModel(model);
-      else setStage('model');
-    } catch (reason) {
-      setError(plainError(reason));
-      setStage('install');
-    }
-  };
-
-  const download = async () => {
-    setError(null);
-    setProgress(null);
-    setStage('downloading');
-    try {
-      await pullOllamaModel(settings.ollamaBaseUrl, RECOMMENDED_OLLAMA_MODEL, setProgress);
-      await useModel(RECOMMENDED_OLLAMA_MODEL);
-    } catch {
-      setError(
-        'The download stopped. Check your internet connection and free disk space, make sure Ollama is open, then try again. It picks up where it left off.',
-      );
-      setStage('model');
-    }
-  };
-
-  if (stage === 'done') {
-    return (
-      <SetupDone
-        testId="local-ready"
-        onClose={() => {
-          void onDone();
-          window.close();
-        }}
-      />
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4 rounded-lg bg-muted p-4" data-testid="local-setup">
       <div>
         <p className="text-base font-semibold">Set up your free local AI</p>
         <p className="text-sm text-muted-foreground">
-          Sima will use a free app called Ollama to run AI on this computer, so question text stays
-          here. Local AI can be slower and less accurate than online AI, so check every answer.
+          Sima runs AI on this computer with a free app called Ollama, so your questions never leave
+          it. There's no account or key. Check every answer, since the AI can be wrong.
         </p>
       </div>
 
-      {(stage === 'install' || stage === 'checking') && (
-        <>
+      {ollama === 'looking' && !running && (
+        <p className="flex items-center gap-2 text-sm" data-testid="local-looking">
+          <LoaderCircle className="size-4 animate-spin" /> Looking for Ollama…
+        </p>
+      )}
+
+      {ollama === 'not_running' && !running && (
+        <div className="flex flex-col gap-3" data-testid="local-install">
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm" data-testid="local-steps">
-            <li>Download Ollama, then install and open it.</li>
-            <li>Come back here and click Ollama is open.</li>
-            <li>If Chrome asks, click Allow so Sima can talk to Ollama.</li>
+            <li>Download Ollama, then install it.</li>
+            <li>Open Ollama. Sima notices by itself and moves to the next step.</li>
           </ol>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               className="bg-background"
@@ -123,56 +106,48 @@ export function LocalSetup({
             >
               <ExternalLink /> Download Ollama
             </Button>
-            <Button
-              data-testid="ollama-ready"
-              disabled={stage === 'checking'}
-              onClick={() => void check()}
-            >
-              {stage === 'checking' && <LoaderCircle className="animate-spin" />}
-              {stage === 'checking' ? 'Looking for Ollama…' : 'Ollama is open'}
-            </Button>
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LoaderCircle className="size-3 animate-spin" /> Waiting for Ollama
+            </span>
           </div>
-        </>
-      )}
-
-      {stage === 'model' && (
-        <>
-          <p className="text-sm" data-testid="local-model-step">
-            Ollama is ready. Now download the AI model. It needs about 5 GB of free space and can
-            take a while on slower connections.
-          </p>
-          <Button className="self-start" data-testid="ollama-pull" onClick={() => void download()}>
-            <Download /> Download the AI model
-          </Button>
-        </>
-      )}
-
-      {stage === 'downloading' && (
-        <div className="flex flex-col gap-2" data-testid="local-downloading">
-          <Progress value={(progress ?? 0) * 100} />
-          <p className="text-sm">
-            {progress === null
-              ? 'Starting the download…'
-              : `${Math.round(progress * 100)}% downloaded`}
-            . Keep this tab open.
-          </p>
         </div>
       )}
 
-      {error && (
-        <p className="text-sm font-medium text-destructive" data-testid="local-setup-error">
-          {error}
-        </p>
+      {blocked && !running && <OllamaAccess onCheck={check} />}
+
+      {ollama === 'ready' && !blocked && !running && (
+        <div className="flex flex-col gap-3" data-testid="local-model-step">
+          <p className="text-sm">
+            Ollama is ready. Last step: download the AI model. It needs about 5 GB of free space and
+            can take a while on slower connections. You can close Sima while it downloads.
+          </p>
+          {stopped && (
+            <p className="text-sm font-medium text-destructive" data-testid="local-setup-error">
+              The download stopped. Check your internet connection and free disk space, make sure
+              Ollama is open, then try again. It picks up where it left off.
+            </p>
+          )}
+          <Button
+            className="self-start"
+            data-testid="ollama-pull"
+            onClick={() => void startDownload()}
+          >
+            <Download /> {stopped ? 'Try the download again' : 'Download the AI model'}
+          </Button>
+        </div>
       )}
 
-      <button
-        type="button"
-        className="self-start text-xs text-muted-foreground underline"
-        data-testid="local-manual"
-        onClick={onManual}
-      >
-        I'll enter the Ollama address and model myself
-      </button>
+      {download && running && (
+        <div className="flex flex-col gap-2" data-testid="local-downloading">
+          <Progress value={(download.fraction ?? 0) * 100} />
+          <p className="text-sm">
+            {download.fraction === null
+              ? 'Starting the download…'
+              : `${Math.round(download.fraction * 100)}% downloaded.`}{' '}
+            You can close Sima. The download keeps going while Chrome is open.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

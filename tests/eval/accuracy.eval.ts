@@ -83,7 +83,7 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 
 it(`accuracy of ${MODEL}`, { timeout: 1_800_000 }, async () => {
   const adapters = [gradescopeAdapter, vhlAdapter, webassignAdapter];
-  const provider = createOllamaProvider({ apiKey: '' });
+  const provider = createOllamaProvider();
   const pages: Array<{ list: Question[]; instructions: string }> = [];
   for (const path of PAGES.filter((page) => page.includes(process.env.SIMA_EVAL_ONLY ?? ''))) {
     const url = new URL(`http://127.0.0.1:5199${path}`);

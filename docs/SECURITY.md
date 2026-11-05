@@ -13,9 +13,9 @@ Webpages are untrusted, including course content that an instructor or another p
 | Model output contains markup           | React renders it as text. Nothing uses `dangerouslySetInnerHTML`                                                                                                       |
 | Selector now points at another element | Element fingerprint check before every action                                                                                                                          |
 | Submit control presented as "Next"     | Label and type are checked at analysis and again at execution                                                                                                          |
-| Page reads the API key                 | Keys stay in `storage.local`, locked to trusted contexts, and are used only in the worker                                                                              |
-| Compromised content script             | Settings and key commands are rejected unless sent from an extension page                                                                                              |
-| Key leaks through errors or URLs       | Keys travel in headers only, and are redacted from provider errors                                                                                                     |
+| Page reads stored data                 | `storage.local` is locked to trusted contexts, and Dexie is opened only from the worker                                                                                |
+| Compromised content script             | Settings commands are rejected unless sent from an extension page                                                                                                      |
+| Settings point Sima at another server  | The Ollama address must be `http://localhost` or `http://127.0.0.1`, checked by Zod in the worker                                                                      |
 | A page detects Sima                    | No web-accessible resources. The floating UI's host element is still visible to the page                                                                               |
 
 Injection defenses reduce the risk but can't eliminate it: visible text can still sway an answer. Sentence-level detection misses phrasing it doesn't recognize, and Fill answers enters answers without a review step. The worst a successful injection can do is put a wrong value in a field on that page, which the user can see and change before submitting.
@@ -26,9 +26,9 @@ Sima enforces what it can see, and stays off on anything that looks like an asse
 
 ## Data handling
 
-- **Stored locally:** extracted questions, responses, explanations and action logs in IndexedDB; preferences and keys in `chrome.storage.local`.
-- **Sent externally:** only when the user asks Sima to work through a question. The text, tables, image descriptions and field labels for that question go to the chosen provider, after a disclosure the user acknowledges. There's no Sima backend and no analytics.
-- **Deleting:** Settings has separate controls for saved activities and API keys. Removing the extension deletes everything.
+- **Stored locally:** extracted questions, responses, explanations and action logs in IndexedDB; preferences in `chrome.storage.local`. There are no API keys, and the worker deletes any an earlier build saved.
+- **Sent externally:** nothing Sima reads. Question text goes only to Ollama on this computer. There's no Sima backend and no analytics.
+- **Deleting:** Settings can delete saved activities. Removing the extension deletes everything.
 
 ## Page layout captures
 
@@ -36,16 +36,14 @@ Sima enforces what it can see, and stays off on anything that looks like an asse
 
 ## Permissions
 
-| Permission                              | Why                                                                                                       |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `storage`                               | Preferences and keys                                                                                      |
-| Host access to the three platforms      | Reading and filling activities                                                                            |
-| Host access to Google's Gemini API      | The default provider for adults, so setup doesn't stop on a prompt. Nothing is sent until you paste a key |
-| Optional host access to other providers | Requested when you test that provider's connection                                                        |
+| Permission                         | Why                                       |
+| ---------------------------------- | ----------------------------------------- |
+| `storage`                          | Preferences                               |
+| Host access to the three platforms | Reading and filling activities            |
+| Host access to `localhost`         | Reaching Ollama, the only model Sima uses |
 
 ## Known gaps
 
-- API keys aren't encrypted at rest.
 - Restriction detection is heuristic and only sees the current page.
 - Page content is treated as trusted by the user when they review it: Sima shows extracted text, not a guarantee of what it means.
 

@@ -17,17 +17,11 @@ export default defineConfig({
       'https://*.gradescope.com/*',
       'https://*.vhlcentral.com/*',
       'https://*.webassign.net/*',
-      // The default provider for adults, so setup doesn't stop on a permission prompt.
-      'https://generativelanguage.googleapis.com/*',
-      // Development builds talk to the mock platforms and a local model without a prompt.
-      ...(PLAYGROUND ? [...PLAYGROUND_MATCHES, 'http://localhost/*', 'http://127.0.0.1/*'] : []),
-    ],
-    // Requested from Settings when a provider is configured, one provider at a time.
-    optional_host_permissions: [
-      'https://api.openai.com/*',
-      'https://api.anthropic.com/*',
+      // Ollama on this computer, the only place question text is sent.
       'http://localhost/*',
       'http://127.0.0.1/*',
+      // Development builds also read the mock platforms.
+      ...(PLAYGROUND ? PLAYGROUND_MATCHES : []),
     ],
     action: { default_title: 'Open Sima' },
   },

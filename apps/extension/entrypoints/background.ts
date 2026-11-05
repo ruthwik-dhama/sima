@@ -4,24 +4,32 @@ import {
   ActionResultSchema,
   CaptureResultSchema,
   ContentEventSchema,
-  isAdultOn,
+  MODEL_DOWNLOAD_KEY,
   PageAnalysisSchema,
   UiCommandSchema,
   type ContentCommand,
   type FloatingState,
+  type ModelDownload,
+  type OllamaStatus,
   type Reply,
   type UiCommand,
 } from '@sima/shared-types';
-import { buildProvider, reasoner } from '@/services/reasoner';
 import {
-  assertProviderAllowed,
-  configuredProviders,
-  deleteApiKeys,
+  chooseDefaultOllamaModel,
+  isOllamaBlocked,
+  pullOllamaModel,
+  RECOMMENDED_OLLAMA_MODEL,
+} from '@sima/model-providers';
+import { keepWorkerAlive, ollamaProvider, reasoner } from '@/services/reasoner';
+import {
   loadSettings,
   lockStorageToExtensionPages,
-  saveApiKey,
+  removeOldApiKeys,
   saveSettings,
 } from '@/services/settings';
+
+/** How often a running download records that it's still alive, so a dead one can be spotted. */
+const DOWNLOAD_HEARTBEAT_MS = 10_000;
 
 const STATUS_LABEL: Record<string, string> = {
   analyzing: 'Reading page',
@@ -102,6 +110,60 @@ export default defineBackground(() => {
     if (task?.tabId != null) await pushFloating(task.tabId);
   }
 
+  /** Finds Ollama, and picks an installed model if none is chosen, so setup needs no clicks. */
+  async function checkOllama(): Promise<OllamaStatus> {
+    const settings = await loadSettings();
+    try {
+      const models = await ollamaProvider(settings).listModels();
+      const pick = settings.model ? null : chooseDefaultOllamaModel(models);
+      if (pick) await saveSettings({ ...(await loadSettings()), model: pick });
+      return { status: 'ready', models };
+    } catch (error) {
+      return { status: isOllamaBlocked(error) ? 'blocked' : 'not_running', models: [] };
+    }
+  }
+
+  /**
+   * Downloads the recommended model here rather than in the dropdown, which closes whenever the
+   * user clicks elsewhere. Progress goes to storage so any Sima page can show it.
+   */
+  async function downloadModel(): Promise<void> {
+    const stored = await chrome.storage.local.get(MODEL_DOWNLOAD_KEY);
+    const current = stored[MODEL_DOWNLOAD_KEY] as ModelDownload | undefined;
+    if (current?.state === 'running' && Date.now() - current.updatedAt < 3 * DOWNLOAD_HEARTBEAT_MS)
+      return;
+    let state: Omit<ModelDownload, 'updatedAt'> = {
+      model: RECOMMENDED_OLLAMA_MODEL,
+      state: 'running',
+      fraction: null,
+    };
+    const write = () =>
+      chrome.storage.local.set({ [MODEL_DOWNLOAD_KEY]: { ...state, updatedAt: Date.now() } });
+    await write();
+    const heartbeat = setInterval(() => void write(), DOWNLOAD_HEARTBEAT_MS);
+    let lastWrite = 0;
+    try {
+      const settings = await loadSettings();
+      await keepWorkerAlive(() =>
+        pullOllamaModel(settings.ollamaBaseUrl, RECOMMENDED_OLLAMA_MODEL, (fraction) => {
+          state = { ...state, fraction };
+          if (Date.now() - lastWrite > 500) {
+            lastWrite = Date.now();
+            void write();
+          }
+        }),
+      );
+      clearInterval(heartbeat);
+      const latest = await loadSettings();
+      await saveSettings({ ...latest, model: latest.model || RECOMMENDED_OLLAMA_MODEL });
+      await chrome.storage.local.remove(MODEL_DOWNLOAD_KEY);
+    } catch (error) {
+      clearInterval(heartbeat);
+      state = { ...state, state: isOllamaBlocked(error) ? 'blocked' : 'failed', fraction: null };
+      await write();
+    }
+  }
+
   async function assertPlatformEnabled(taskId: string): Promise<void> {
     const task = await store.getTask(taskId);
     const settings = await loadSettings();
@@ -163,53 +225,19 @@ export default defineBackground(() => {
         return CaptureResultSchema.parse(raw);
       }
       case 'GET_SETTINGS':
-        return { settings: await loadSettings(), configured: await configuredProviders() };
-      case 'SAVE_SETTINGS': {
-        // The age result only ever changes through SET_BIRTH_DATE.
-        const { ageCheck } = await loadSettings();
-        const next = { ...command.settings, ageCheck };
-        if (ageCheck !== 'unset') assertProviderAllowed(next, next.activeProvider);
-        return saveSettings(next);
-      }
-      case 'SET_BIRTH_DATE': {
-        const settings = await loadSettings();
-        if (settings.ageCheck !== 'unset') throw new Error('Your birth date is already set.');
-        const adult = isAdultOn(command.birthDate, new Date());
-        if (adult === null) throw new Error('Enter a real birth date.');
-        // Someone already set up on a local model stays on it, and can switch in Settings.
-        const keepLocal =
-          adult && settings.models.ollama !== '' && settings.activeProvider === 'ollama';
-        return saveSettings({
-          ...settings,
-          ageCheck: adult ? 'adult' : 'minor',
-          activeProvider: adult && !keepLocal ? 'gemini' : 'ollama',
-        });
-      }
-      case 'SET_API_KEY':
-        assertProviderAllowed(await loadSettings(), command.provider);
-        return saveApiKey(command.provider, command.apiKey);
-      case 'ACKNOWLEDGE_PROVIDER': {
-        const settings = await loadSettings();
-        assertProviderAllowed(settings, command.provider);
-        return saveSettings({
-          ...settings,
-          acknowledgedProviders: [
-            ...new Set([...settings.acknowledgedProviders, command.provider]),
-          ],
-        });
-      }
-      case 'TEST_PROVIDER': {
-        const settings = await loadSettings();
-        assertProviderAllowed(settings, command.provider);
-        const provider = await buildProvider(command.provider, settings);
-        return provider.listModels();
-      }
+        return { settings: await loadSettings() };
+      case 'SAVE_SETTINGS':
+        return saveSettings(command.settings);
+      case 'CHECK_OLLAMA':
+        return checkOllama();
+      case 'DOWNLOAD_MODEL':
+        // Answers at once. The download carries on, and reports through storage.
+        void downloadModel();
+        return undefined;
       case 'DELETE_TASK_DATA':
         await store.deleteAll();
         await announce(null);
         return undefined;
-      case 'DELETE_API_KEYS':
-        return deleteApiKeys();
       case 'OPEN_POPUP':
       case 'DISMISS_FLOATING':
         throw new Error('Handled from the content script');
@@ -273,6 +301,7 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => void engine.detachTab(tabId).catch(() => undefined));
 
   void lockStorageToExtensionPages();
+  void removeOldApiKeys();
   // A status still in flight here means the previous worker died partway through a step.
   void engine.recover().catch(() => undefined);
 });

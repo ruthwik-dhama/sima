@@ -62,7 +62,7 @@ export interface Reasoner {
     name: string,
     hooks?: { onBusy?: () => Promise<void> },
   ): Promise<unknown>;
-  /** Throws when the provider is unconfigured or its data disclosure was not acknowledged. */
+  /** Throws when local AI is not set up yet. */
   assertReady(): Promise<void>;
 }
 
@@ -367,7 +367,7 @@ export class TaskEngine {
       if (index > 0)
         await this.setNote(taskId, `Answering questions, part ${index + 1} of ${chunks.length}…`);
       const members = chunk.flatMap((question) => pending.filter((r) => r.question === question));
-      // Once a provider says it's overloaded, more requests only add to the wait.
+      // Once Ollama says it's busy, more requests only add to the wait.
       if (busyError) {
         for (const record of members) {
           await this.updateRecord(record.id, (latest) => ({ ...latest, solveError: busyError }));
@@ -380,7 +380,7 @@ export class TaskEngine {
     await this.setStatus(task, 'review', {}, ['reasoning']);
   }
 
-  /** Solves one group. Returns the error text if the provider was overloaded or rate limited. */
+  /** Solves one group. Returns the error text if Ollama was too busy to answer. */
   private async solveMembers(
     members: QuestionRecord[],
     instructions: string,

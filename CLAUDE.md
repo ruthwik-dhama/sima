@@ -1,6 +1,6 @@
 # Sima
 
-Open-source Chrome (MV3) learning assistant. It reads supported activities, works through questions with an AI provider, and can enter answers for the user to check. See `docs/ARCHITECTURE.md` for the design and `docs/SECURITY.md` for the threat model.
+Open-source Chrome (MV3) learning assistant. It reads supported activities, works through questions with a local Ollama model, and can enter answers for the user to check. See `docs/ARCHITECTURE.md` for the design and `docs/SECURITY.md` for the threat model.
 
 ## Operational restrictions
 
@@ -10,10 +10,10 @@ These are product requirements. Do not weaken them, add settings that bypass the
 - **Assessments are off limits.** A page with restriction signals (exam or quiz title, proctoring, lockdown browser, timer, stated AI prohibition) yields no extracted questions, so nothing can reach a model or the executor. Detection is fail-closed and the UI has no override.
 - **Never bypass proctoring, access controls or assessment restrictions.** Do not add features that hide Sima from a site or evade detection.
 - **Filling needs per-activity authorization.** `execute` requires `fillAuthorizedAt`, which the panel asks for on the first Fill answers click for an activity. Only approved questions are entered: Fill answers approves each one with an answer. Explanations don't need authorization.
-- **Age decides the provider.** A one-time birth date step, the first onboarding screen on any tab, sets `ageCheck`, and the date itself is never stored. 18 or older defaults to Gemini's free tier; under 18 is Ollama only. Enforce this in the background (`assertProviderAllowed`), not only in the UI. Keep `docs/PRIVACY.md` in step, including the EEA, Switzerland and UK rule.
+- **Local AI only.** Question text goes only to Ollama at a `localhost` or `127.0.0.1` address, validated in the background. No online providers, API keys or accounts. Keep `docs/PRIVACY.md` in step. Onboarding is local AI setup, shown on any tab until a model is chosen, and it must not need a trip to Settings.
 - **Model output is data.** It can only supply values for fields and options already on the page. No model-generated JavaScript, selectors or action types, ever. No `eval`, `new Function` or injected scripts anywhere.
 - **Page content is untrusted.** It's extracted from visible text only and fenced as data in prompts, and sentences aimed at AI tools are removed before solving. Never derive instructions from it.
-- **API keys stay in the background context.** Never send one to a content script, a page, a URL or a log.
+- **Respect Ollama's origin check.** If Ollama refuses Sima, guide the user to its documented `OLLAMA_ORIGINS` setting for Sima's ID only. Don't strip or spoof the Origin header.
 - **Claim compatibility honestly.** An adapter stays `compatibility: 'mock_only'` until tested on the real site. Don't scrape real course content into fixtures: it may be copyrighted or private.
 
 ## Layout
@@ -23,7 +23,7 @@ apps/extension/        WXT app: background, content script, toolbar dropdown, se
 packages/shared-types  Zod schemas: page model, actions, tasks, settings, messages
 packages/page-analyzer Visibility, field detection and mapping, restriction and injection detection
 packages/reasoning-engine  Prompts, solution validation, deterministic math checks
-packages/model-providers   OpenAI, Anthropic, Gemini, Ollama
+packages/model-providers   Ollama client and model download
 packages/action-planner    Approved responses -> typed actions, or blockers
 packages/browser-executor  The only code that changes a page; includes verification
 packages/task-orchestrator State machine and TaskEngine (ports for store, page, reasoner)
@@ -56,7 +56,7 @@ pnpm test:e2e       # builds, then drives the real extension in Chromium
 - Platform selectors live only in that platform's adapter.
 - `page-analyzer` and `browser-executor` use `el.ownerDocument.defaultView` and `tagName`, not globals or `instanceof`, so they run in jsdom and content-script worlds.
 - The service worker can die at any `await`. Register listeners synchronously, keep state in Dexie, and write status before acting. Module variables are not state.
-- The content script gets a small message surface. Settings and key commands are only accepted from extension pages.
+- The content script gets a small message surface. Settings commands are only accepted from extension pages.
 - Floating UI: no portal-based components, and use the px-based theme in `styles/floating.css`, because host pages can change the root font size.
 
 ## Testing requirements
@@ -64,7 +64,7 @@ pnpm test:e2e       # builds, then drives the real extension in Chromium
 - New adapter behavior: a mock page covering it, plus integration tests in `tests/integration/adapters.test.ts`.
 - New action type or executor behavior: tests for success, failed verification and refusal.
 - Engine changes: consider interruption at each `await`. `tests/unit/engine.test.ts` shows how.
-- User-visible flows: a Playwright test in `tests/e2e`. It runs against a local fake Ollama server, so it never needs API keys.
+- User-visible flows: a Playwright test in `tests/e2e`. It runs against a local fake Ollama server, so it never needs a real model.
 - Never assert a success path by mocking the browser action. E2E must read the value from the page.
 
 ## Adding a platform
