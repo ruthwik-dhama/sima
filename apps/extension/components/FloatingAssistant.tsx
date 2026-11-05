@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, X } from 'lucide-react';
+import { X } from 'lucide-react';
+// Bundled as data, so no web-accessible file exists for a page to fingerprint Sima with.
+import logo from '@/assets/logo.png?inline';
 import type { FloatingState } from '@sima/shared-types';
 
 interface Props {
@@ -34,9 +36,14 @@ export function FloatingAssistant({ initial, subscribe, onOpen, onDismiss }: Pro
         aria-label={`Open Sima: ${state.activityTitle}`}
         title={`${state.activityTitle} · ${state.status}`}
         onClick={onOpen}
-        className="flex h-9 cursor-pointer items-center gap-1.5 rounded-full px-3.5 hover:bg-muted"
+        className="flex h-9 cursor-pointer items-center gap-1.5 rounded-full pr-3.5 pl-2 hover:bg-muted"
       >
-        <Sparkles className="size-4 shrink-0 text-primary" />
+        <img
+          src={logo}
+          alt=""
+          className="size-5 shrink-0 rounded-[5px]"
+          data-testid="sima-floating-logo"
+        />
         <span className="font-semibold">Sima</span>
         {detail && (
           <span

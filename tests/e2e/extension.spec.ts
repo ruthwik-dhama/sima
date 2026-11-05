@@ -21,6 +21,10 @@ test.describe('foundation', () => {
     const floating = page.getByTestId('sima-floating');
     await expect(floating).toBeVisible();
     await expect(page.getByTestId('sima-floating-status')).toContainText('0 of 5');
+    const pillLogo = page.getByTestId('sima-floating-logo');
+    await expect(pillLogo).toBeVisible();
+    expect(await pillLogo.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+    expect(await pillLogo.getAttribute('src')).toMatch(/^data:image\/png/);
     const style = await page.getByTestId('sima-floating-status').evaluate((el) => {
       const s = getComputedStyle(el);
       return { fontSize: s.fontSize, color: s.color };
@@ -516,6 +520,9 @@ test.describe('dropdown rows', () => {
   test('the header shows only the title and progress', async ({ openActivity }) => {
     const { panel } = await openActivity('/webassign/assignment.html?q=1');
     await status(panel, 'ready');
+    const logo = panel.getByTestId('sima-logo');
+    await expect(logo).toBeVisible();
+    expect(await logo.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
     await expect(panel.getByTestId('activity-title')).toHaveText('Ch. 2 Homework');
     await expect(panel.getByTestId('progress-text')).toContainText('0 of 1');
     await expect(panel.getByTestId('task-status')).not.toContainText('WebAssign');

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { CircleAlert, Settings, Sparkles } from 'lucide-react';
+import logo from '@/assets/logo.png?inline';
+import { CircleAlert, Settings } from 'lucide-react';
 import { PROVIDER_ENDPOINTS } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,7 @@ export function App() {
         data-page={analysis?.pagination.index}
       >
         <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-primary" />
+          <img src={logo} alt="" className="size-6 rounded-[6px]" data-testid="sima-logo" />
           <span className="font-semibold">Sima</span>
           <Button
             variant="ghost"
