@@ -12,7 +12,7 @@ import {
 import { startPlayground } from '../../playground/server.mjs';
 
 export const MOCK = 'http://127.0.0.1:5199';
-const OLLAMA_PORT = 11499;
+export const OLLAMA_PORT = 11499;
 const EXTENSION = resolve('apps/extension/.output-e2e/chrome-mv3');
 
 /** A real HTTP server speaking Ollama's protocol, so the whole provider path runs. No model behind it. */
@@ -20,6 +20,9 @@ export interface FakeModel {
   requests: string[];
   overrides: Array<(prompt: string) => unknown | undefined>;
   delayMs?: number;
+  /** What Ollama reports as installed. Tests change it to act like a fresh install. */
+  installed: string[];
+  pulled: string[];
 }
 
 function keysIn(prompt: string): string[] {
@@ -106,7 +109,19 @@ function startFakeModel(model: FakeModel): Promise<Server> {
     req.on('end', () => {
       res.setHeader('content-type', 'application/json');
       if (req.url === '/api/tags')
-        return res.end(JSON.stringify({ models: [{ name: 'fake-model' }] }));
+        return res.end(JSON.stringify({ models: model.installed.map((name) => ({ name })) }));
+      if (req.url === '/api/pull') {
+        const name = (JSON.parse(body) as { model: string }).model;
+        model.pulled.push(name);
+        res.write('{"status":"pulling manifest"}\n');
+        res.write('{"status":"pulling a","digest":"a","total":100,"completed":40}\n');
+        return setTimeout(() => {
+          model.installed.push(name);
+          res.end(
+            '{"status":"pulling a","digest":"a","total":100,"completed":100}\n{"status":"success"}\n',
+          );
+        }, 300);
+      }
       const parsed = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
       const prompt = parsed.messages.find((m) => m.role === 'user')?.content ?? '';
       model.requests.push(prompt);
@@ -134,7 +149,12 @@ interface Fixtures {
 
 export const test = base.extend<Fixtures>({
   model: async ({}, use) => {
-    const model: FakeModel = { requests: [], overrides: [] };
+    const model: FakeModel = {
+      requests: [],
+      overrides: [],
+      installed: ['fake-model'],
+      pulled: [],
+    };
     const server = await startFakeModel(model);
     await use(model);
     await new Promise((r) => server.close(r));
@@ -166,6 +186,7 @@ export const test = base.extend<Fixtures>({
     await settings.goto(`chrome-extension://${extensionId}/options.html`);
     await setBirthDate(settings, MINOR_BIRTH_DATE);
     await settings.reload();
+    await settings.getByTestId('local-manual').click();
     await settings.getByTestId('ollama-url').fill(`http://127.0.0.1:${OLLAMA_PORT}`);
     await settings.getByTestId('model').fill('fake-model');
     await settings.close();

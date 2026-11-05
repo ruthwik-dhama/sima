@@ -88,11 +88,6 @@ export function analyzePage(
       `No questions recognized. This ${adapter.displayName} layout may not be supported yet.`,
     );
   }
-  if (adapter.compatibility === 'mock_only' && !isPlaygroundUrl(url, adapter.id)) {
-    warnings.push(
-      `The ${adapter.displayName} adapter has only been tested against a local mock, not this live site.`,
-    );
-  }
   return {
     platformId: adapter.id,
     platformName: adapter.displayName,

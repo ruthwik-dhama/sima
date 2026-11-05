@@ -338,6 +338,65 @@ export function createOllamaProvider(config: ProviderConfig): ModelProvider {
   };
 }
 
+export const RECOMMENDED_OLLAMA_MODEL = 'qwen2.5:7b';
+
+/** The recommended model if it's installed, otherwise the first that can answer questions. */
+export function chooseDefaultOllamaModel(models: string[]): string | null {
+  if (models.includes(RECOMMENDED_OLLAMA_MODEL)) return RECOMMENDED_OLLAMA_MODEL;
+  return models.find((model) => !/embed/i.test(model)) ?? null;
+}
+
+/**
+ * Downloads a model through Ollama, reporting 0 to 1. Ollama keeps what it already has, so calling
+ * this again after a failure resumes. It only finishes on Ollama's own success line.
+ */
+export async function pullOllamaModel(
+  baseUrl: string,
+  model: string,
+  onProgress: (fraction: number) => void,
+  fetchImpl: typeof fetch = fetch.bind(globalThis),
+): Promise<void> {
+  const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/api/pull`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model, stream: true }),
+  });
+  if (!response.ok || !response.body) {
+    throw new ProviderError(`Provider returned ${response.status}.`, response.status);
+  }
+  const layers = new Map<string, { total: number; completed: number }>();
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let pending = '';
+  let succeeded = false;
+  const readLine = (line: string) => {
+    if (!line.trim()) return;
+    const update = JSON.parse(line) as Record<string, unknown>;
+    if (typeof update.error === 'string') throw new ProviderError(update.error);
+    if (update.status === 'success') succeeded = true;
+    if (typeof update.digest === 'string' && typeof update.total === 'number') {
+      layers.set(update.digest, {
+        total: update.total,
+        completed: typeof update.completed === 'number' ? update.completed : 0,
+      });
+      const all = [...layers.values()];
+      const total = all.reduce((sum, layer) => sum + layer.total, 0);
+      const completed = all.reduce((sum, layer) => sum + layer.completed, 0);
+      if (total > 0) onProgress(Math.min(completed / total, 1));
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const lines = pending.split('\n');
+    pending = lines.pop() ?? '';
+    lines.forEach(readLine);
+    if (done) break;
+  }
+  readLine(pending);
+  if (!succeeded) throw new ProviderError('The download ended early.');
+}
+
 const GEMINI_TEXT_MODEL = (model: string) =>
   /flash/i.test(model) && !/image|tts|audio|live|embedding|robotics|preview|exp/i.test(model);
 const geminiVersion = (model: string) => Number(model.match(/(\d+(?:\.\d+)?)/)?.[1] ?? 0);

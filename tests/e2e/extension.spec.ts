@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import {
   ADULT_BIRTH_DATE,
+  OLLAMA_PORT,
   expect,
   fillFirstTime,
   MINOR_BIRTH_DATE,
@@ -145,9 +146,11 @@ test.describe('foundation', () => {
     await options.goto(`chrome-extension://${extensionId}/options.html`);
     await setBirthDate(options, MINOR_BIRTH_DATE);
     await options.reload();
+    await options.getByTestId('local-manual').click();
     await options.getByTestId('ollama-url').fill('https://attacker.example');
     await expect(options.getByTestId('settings-message')).toBeVisible();
     await options.reload();
+    await options.getByTestId('local-manual').click();
     await expect(options.getByTestId('ollama-url')).not.toHaveValue('https://attacker.example');
   });
 
@@ -865,17 +868,83 @@ test.describe('birth date and default provider', () => {
     return panel;
   }
 
-  test('a new user must enter a birth date before anything can run', async ({
+  test('a new user sees only the birth date step, and nothing can run before it', async ({
     context,
     extensionId,
     worker,
     model,
   }) => {
     const panel = await freshPanel(context, extensionId, worker);
+    await expect(panel.getByTestId('onboarding')).toContainText('Welcome to Sima');
     await expect(panel.getByTestId('age-gate')).toBeVisible();
-    await panel.getByTestId('solve-all').click();
-    await expect(panel.getByTestId('panel-error')).toContainText('birth date');
+    await expect(panel.getByTestId('solve-all')).toHaveCount(0);
+    await expect(panel.getByTestId('activity-title')).toHaveCount(0);
+    await expect(panel.getByTestId('open-settings-gear')).toHaveCount(0);
+
+    // The background refuses too, without going through the panel.
+    const page = context.pages().find((open) => open.url().includes('/vhl/activity.html'));
+    const reply = await panel.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      await chrome.runtime.sendMessage({ type: 'ANALYZE', tabId: tab?.id });
+      const view = await chrome.runtime.sendMessage({ type: 'GET_VIEW', tabId: tab?.id });
+      return chrome.runtime.sendMessage({ type: 'SOLVE', taskId: view.data.task.id });
+    }, page?.url() ?? '');
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toContain('birth date');
     expect(model.requests).toEqual([]);
+
+    // Answering it goes straight into Sima, on the same activity.
+    await panel.getByTestId('birth-date').fill(MINOR_BIRTH_DATE);
+    await panel.getByTestId('birth-date-submit').click();
+    await expect(panel.getByTestId('onboarding-step')).toContainText('Step 2 of 2');
+    await expect(panel.getByTestId('model-missing')).toContainText('local AI');
+    await expect(panel.getByTestId('solve-all')).toHaveCount(0);
+
+    // Finishing setup, which happens in another tab, goes straight into Sima on this activity.
+    await panel.evaluate(async () => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_SETTINGS',
+        settings: { ...data.settings, models: { ...data.settings.models, ollama: 'fake-model' } },
+      });
+    });
+    await expect(panel.getByTestId('onboarding')).toHaveCount(0);
+    await expect(panel.getByTestId('activity-title')).toBeVisible();
+    await expect(panel.getByTestId('solve-all')).toBeVisible();
+  });
+
+  test('the birth date step comes first on a site Sima does not support', async ({
+    context,
+    extensionId,
+    worker,
+  }) => {
+    const page = await context.newPage();
+    await page.goto(`${MOCK}/`);
+    const tabId = await worker.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({ url });
+      return tab?.id as number;
+    }, page.url());
+    const panel = await context.newPage();
+    await panel.goto(`chrome-extension://${extensionId}/popup.html?tabId=${tabId}`);
+    await expect(panel.getByTestId('age-gate')).toBeVisible();
+    await expect(panel.getByTestId('empty-state')).toHaveCount(0);
+
+    await panel.getByTestId('birth-date').fill(ADULT_BIRTH_DATE);
+    await panel.getByTestId('birth-date-submit').click();
+    await expect(panel.getByTestId('model-missing')).toContainText('Turn on free AI');
+    await expect(panel.getByTestId('empty-state')).toHaveCount(0);
+    await panel.reload();
+    await expect(panel.getByTestId('model-missing')).toBeVisible();
+    await expect(panel.getByTestId('age-gate')).toHaveCount(0);
+
+    await panel.evaluate(async () => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_SETTINGS',
+        settings: { ...data.settings, models: { ...data.settings.models, gemini: 'g' } },
+      });
+    });
+    await expect(panel.getByTestId('empty-state')).toContainText('No supported activity');
   });
 
   test('18 or older gets Gemini by default, with the setup and terms shown', async ({
@@ -900,7 +969,7 @@ test.describe('birth date and default provider', () => {
     // Adults can still choose the local model.
     await settings.getByTestId('provider-select').click();
     await settings.getByRole('option', { name: 'Ollama (local)' }).click();
-    await expect(settings.getByTestId('ollama-url')).toBeVisible();
+    await expect(settings.getByTestId('local-setup')).toBeVisible();
   });
 
   test('under 18 gets Ollama, and online providers stay refused', async ({
@@ -911,7 +980,7 @@ test.describe('birth date and default provider', () => {
     const panel = await freshPanel(context, extensionId, worker);
     await panel.getByTestId('birth-date').fill(MINOR_BIRTH_DATE);
     await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('model-missing')).toContainText('Ollama');
+    await expect(panel.getByTestId('model-missing')).toContainText('local AI');
 
     const opened = context.waitForEvent('page');
     await panel.getByTestId('open-settings').click();
@@ -1148,8 +1217,100 @@ test.describe('Gemini setup', () => {
   test('setup offers the local model instead', async ({ context, extensionId, worker }) => {
     const settings = await freshSettings(context, extensionId, worker);
     await settings.getByTestId('gemini-use-local').click();
-    await expect(settings.getByTestId('ollama-url')).toBeVisible();
+    await expect(settings.getByTestId('local-setup')).toBeVisible();
     await expect(settings.getByTestId('gemini-setup')).toHaveCount(0);
+  });
+});
+
+test.describe('local AI setup', () => {
+  async function under18Settings(
+    context: BrowserContext,
+    extensionId: string,
+    baseUrl = `http://127.0.0.1:${OLLAMA_PORT}`,
+  ) {
+    const settings = await context.newPage();
+    await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await setBirthDate(settings, MINOR_BIRTH_DATE);
+    await settings.evaluate(async (url) => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_SETTINGS',
+        settings: { ...data.settings, ollamaBaseUrl: url },
+      });
+    }, baseUrl);
+    await settings.reload();
+    return settings;
+  }
+
+  const savedModel = async (settings: Page) =>
+    settings.evaluate(async () => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      return data.settings.models.ollama as string;
+    });
+
+  test('under 18 is led to Ollama, then Sima downloads the model', async ({
+    context,
+    extensionId,
+    model,
+  }) => {
+    model.installed = [];
+    await context.route('https://ollama.com/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<h1>Ollama stand-in</h1>' }),
+    );
+    const settings = await under18Settings(context, extensionId);
+    await expect(settings.getByTestId('model')).toHaveCount(0);
+
+    const opened = context.waitForEvent('page');
+    await settings.getByTestId('ollama-download').click();
+    expect((await opened).url()).toContain('ollama.com/download');
+    await settings.bringToFront();
+
+    await settings.getByTestId('ollama-ready').click();
+    await expect(settings.getByTestId('local-model-step')).toContainText('5 GB');
+    await settings.getByTestId('ollama-pull').click();
+    await expect(settings.getByTestId('local-ready')).toContainText("You're all set");
+    expect(model.pulled).toEqual(['qwen2.5:7b']);
+    expect(await savedModel(settings)).toBe('qwen2.5:7b');
+  });
+
+  test('a model already in Ollama is used without another download', async ({
+    context,
+    extensionId,
+    model,
+  }) => {
+    const settings = await under18Settings(context, extensionId);
+    await settings.getByTestId('ollama-ready').click();
+    await expect(settings.getByTestId('local-ready')).toBeVisible();
+    expect(model.pulled).toEqual([]);
+    expect(await savedModel(settings)).toBe('fake-model');
+  });
+
+  test('when Ollama is not open, it says so and can try again', async ({
+    context,
+    extensionId,
+    model,
+  }) => {
+    void model;
+    const settings = await under18Settings(context, extensionId, 'http://127.0.0.1:11498');
+    await settings.getByTestId('ollama-ready').click();
+    const error = settings.getByTestId('local-setup-error');
+    await expect(error).toContainText("can't find Ollama");
+    await expect(error).not.toContainText('reach provider');
+    await expect(settings.getByTestId('ollama-ready')).toBeEnabled();
+    expect(await savedModel(settings)).toBe('');
+  });
+
+  test('entering the address and model by hand stays possible', async ({
+    context,
+    extensionId,
+    model,
+  }) => {
+    void model;
+    const settings = await under18Settings(context, extensionId);
+    await settings.getByTestId('local-manual').click();
+    await expect(settings.getByTestId('ollama-url')).toBeVisible();
+    await settings.getByTestId('model').fill('fake-model');
+    await expect(settings.getByTestId('local-setup')).toHaveCount(0);
   });
 });
 
