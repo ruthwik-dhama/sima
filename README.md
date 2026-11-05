@@ -25,7 +25,7 @@
 
 Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with the AI provider you choose, and explains its reasoning. If your course allows it, Sima can also enter the answers for you to check before you submit.
 
-**Status: early development.** Every platform integration has only been tested against local mock pages, not the real sites. Expect the live sites to need adapter work: see [Known limitations](#known-limitations).
+**Status: early development.** VHL Central now handles real activities, but it has only been tried on a few, so Sima still warns that it's untested there. Gradescope and WebAssign have only been tested against local mock pages. See [Known limitations](#known-limitations).
 
 ## What Sima won't do
 
@@ -68,7 +68,7 @@ Then load it in Chrome:
 
 1. Go to `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and choose `apps/extension/.output/chrome-mv3`.
-3. Click the Sima icon in the toolbar, click the gear, and set up a provider. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+3. Click the Sima icon in the toolbar, enter your birth date, and set up a provider. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
 ## Try it on the mock platforms
 
@@ -106,12 +106,14 @@ End-to-end tests need Chromium once: `pnpm exec playwright install chromium`. Th
 
 ## Known limitations
 
-- **Live sites don't work yet.** Sima recognizes each platform's hostname, but its adapters only understand the local mock pages, so real pages show "Sima can't read this page yet". See [Testing on real sites](docs/TESTING-LIVE-SITES.md).
+- **Live support is limited.** VHL Central has been tried on only a few real activities, so other layouts may not work. Gradescope and WebAssign adapters only understand the local mock pages, so their real pages show "Sima can't read this page yet". See [Testing on real sites](docs/TESTING-LIVE-SITES.md).
+- **Answers can be wrong, so check them.** Accuracy depends on the model. Gemini got every question right on one real VHL activity, while a small local model (`qwen2.5:7b`) got 14 of 24 on a local test set. These are small tests, not a guarantee.
+- **Gemini's free tier has limits.** Google doesn't publish fixed numbers, and Gemini can be busy at times. Sima retries when it is, but you may still have to try again later.
 - **Restriction detection is a heuristic.** It reads titles and visible text, so it can miss a restriction stated elsewhere, such as in a syllabus, or block a legitimate activity. A miss doesn't change your obligation to follow course rules.
 - **Images aren't sent to models.** Only their descriptions are, and confidence is capped when a description is missing.
 - **Only top-level documents are read.** Questions inside iframes aren't detected, and rich-text editors built on iframes can't be filled.
 - **API keys are stored unencrypted** in your Chrome profile, like most extensions' settings.
-- **Only the Ollama request path has run end to end,** against a fake local server. OpenAI, Anthropic and Gemini requests are tested with mocked responses, not live APIs.
+- **OpenAI and Anthropic are untested on their live APIs.** Their requests are only tested with mocked responses. Gemini has been used on real activities, and automated tests run the Ollama path against a fake local server.
 
 ## Documentation
 
