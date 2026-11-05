@@ -9,10 +9,8 @@ import type {
   TaskView,
 } from '@sima/shared-types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AgeGate } from '@/components/AgeGate';
 import { Button } from '@/components/ui/button';
 import { sendCommand } from '@/services/messaging';
-import { openSettings } from '@/services/open-settings';
 import { useTaskStore } from '@/stores/task-store';
 
 export function Restricted({ analysis }: { analysis: PageAnalysis }) {
@@ -55,28 +53,8 @@ export function Disclosure({
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
   if (!settings) return null;
-  if (settings.ageCheck === 'unset') return <AgeGate onDone={() => void load()} />;
   const id = settings.activeProvider;
   const provider = providers[id];
-  if (!settings.models[id]) {
-    return (
-      <Alert data-testid="model-missing">
-        <AlertTitle>
-          {id === 'gemini' ? 'Turn on free AI' : 'Choose an AI model to get started'}
-        </AlertTitle>
-        <AlertDescription>
-          <p>
-            {id === 'gemini'
-              ? 'It takes about a minute, and no payment is needed.'
-              : `Sima needs a model for ${provider.name} before it can work through questions.`}
-          </p>
-          <Button size="sm" className="mt-2" data-testid="open-settings" onClick={openSettings}>
-            {id === 'gemini' ? 'Set up Gemini' : 'Open settings'}
-          </Button>
-        </AlertDescription>
-      </Alert>
-    );
-  }
   if (!provider.external || settings.acknowledgedProviders.includes(id)) return null;
   return (
     <Alert data-testid="provider-disclosure">

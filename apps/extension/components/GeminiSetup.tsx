@@ -33,6 +33,23 @@ function plainError(error: unknown): string {
   return "That key didn't work. Go back to Google's page, copy the key again, and paste it here.";
 }
 
+/** The last screen of any AI setup. */
+export function SetupDone({ testId, onClose }: { testId: string; onClose: () => void }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg bg-muted p-4" data-testid={testId}>
+      <p className="flex items-center gap-2 text-base font-semibold">
+        <Check className="size-5 text-success" /> You're all set
+      </p>
+      <p className="text-sm">
+        Go back to your activity, click the Sima icon, then click Fill answers or Explain only.
+      </p>
+      <Button className="self-start" data-testid="setup-close" onClick={onClose}>
+        Back to my activity
+      </Button>
+    </div>
+  );
+}
+
 type Stage = 'agree' | 'paste' | 'checking' | 'done';
 
 /** First-run Gemini setup for someone who has never heard of an API key. */
@@ -107,24 +124,13 @@ export function GeminiSetup({
 
   if (stage === 'done') {
     return (
-      <div className="flex flex-col gap-3 rounded-lg bg-muted p-4" data-testid="gemini-ready">
-        <p className="flex items-center gap-2 text-base font-semibold">
-          <Check className="size-5 text-success" /> You're all set
-        </p>
-        <p className="text-sm">
-          Go back to your activity, click the Sima icon, then click Fill answers or Explain only.
-        </p>
-        <Button
-          className="self-start"
-          data-testid="gemini-setup-close"
-          onClick={() => {
-            void onChanged();
-            window.close();
-          }}
-        >
-          Back to my activity
-        </Button>
-      </div>
+      <SetupDone
+        testId="gemini-ready"
+        onClose={() => {
+          void onChanged();
+          window.close();
+        }}
+      />
     );
   }
 

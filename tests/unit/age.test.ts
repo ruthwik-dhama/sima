@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { chooseDefaultGeminiModel } from '@sima/model-providers';
+import {
+  chooseDefaultGeminiModel,
+  chooseDefaultOllamaModel,
+  pullOllamaModel,
+  RECOMMENDED_OLLAMA_MODEL,
+} from '@sima/model-providers';
 import { DEFAULT_SETTINGS, isAdultOn, SettingsSchema } from '@sima/shared-types';
 
 const on = (y: number, m: number, d: number) => new Date(y, m - 1, d);
@@ -57,5 +62,61 @@ describe('chooseDefaultGeminiModel', () => {
       'gemini-3.5-flash-lite',
     );
     expect(chooseDefaultGeminiModel(['other'])).toBeNull();
+  });
+});
+
+describe('chooseDefaultOllamaModel', () => {
+  it('prefers the recommended model, then any model that can answer', () => {
+    expect(chooseDefaultOllamaModel(['other:1b', RECOMMENDED_OLLAMA_MODEL])).toBe(
+      RECOMMENDED_OLLAMA_MODEL,
+    );
+    expect(chooseDefaultOllamaModel(['nomic-embed-text', 'other:1b'])).toBe('other:1b');
+    expect(chooseDefaultOllamaModel(['nomic-embed-text'])).toBeNull();
+    expect(chooseDefaultOllamaModel([])).toBeNull();
+  });
+});
+
+describe('pullOllamaModel', () => {
+  const stream = (chunks: string[]) =>
+    (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+            controller.close();
+          },
+        }),
+      )) as unknown as typeof fetch;
+
+  it('adds up every layer, including a line split across chunks', async () => {
+    const seen: number[] = [];
+    await pullOllamaModel(
+      'http://localhost:11434/',
+      'm',
+      (fraction) => seen.push(fraction),
+      stream([
+        '{"status":"pulling manifest"}\n{"status":"a","digest":"a","total":100,"completed":50}\n{"sta',
+        'tus":"b","digest":"b","total":100,"completed":50}\n',
+        '{"status":"success"}\n',
+      ]),
+    );
+    expect(seen).toEqual([0.5, 0.5]);
+  });
+
+  it('fails when the stream ends without success', async () => {
+    await expect(
+      pullOllamaModel('http://x', 'm', () => {}, stream(['{"status":"pulling manifest"}\n'])),
+    ).rejects.toThrow('ended early');
+  });
+
+  it('reports an error line from Ollama', async () => {
+    await expect(
+      pullOllamaModel('http://x', 'm', () => {}, stream(['{"error":"no space left"}\n'])),
+    ).rejects.toThrow('no space left');
+  });
+
+  it('fails on a refused request', async () => {
+    const refused = (async () => new Response('', { status: 403 })) as unknown as typeof fetch;
+    await expect(pullOllamaModel('http://x', 'm', () => {}, refused)).rejects.toThrow('403');
   });
 });

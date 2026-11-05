@@ -27,7 +27,9 @@ If a provider reports it's overloaded or rate limited, Sima waits and retries tw
 
 ## Ollama
 
-Ollama must accept requests from the extension's origin:
+**Setting up Ollama:** Settings shows one guided screen. You install and open Ollama, and Sima checks that it can reach it. If no model is installed, Sima downloads `qwen2.5:7b` through Ollama, about 5 GB. If you already have models, Sima uses `qwen2.5:7b` when it's there, or otherwise the first one that can answer questions, and you can change it in Settings.
+
+Current versions of Ollama accept requests from Chrome extensions. If yours refuses them, update it, or start it with:
 
 ```bash
 OLLAMA_ORIGINS="chrome-extension://*" ollama serve

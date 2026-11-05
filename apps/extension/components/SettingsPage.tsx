@@ -3,6 +3,7 @@ import { chooseDefaultGeminiModel } from '@sima/model-providers';
 import { PROVIDER_ENDPOINTS, type ProviderId, type Settings } from '@sima/shared-types';
 import { AgeGate } from '@/components/AgeGate';
 import { GeminiSetup } from '@/components/GeminiSetup';
+import { LocalSetup } from '@/components/LocalSetup';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,6 +27,7 @@ const PRIVACY_URL = 'https://github.com/ruthwik-dhama/sima/blob/main/docs/PRIVAC
 export function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [configured, setConfigured] = useState<ProviderId[]>([]);
+  const [manualLocal, setManualLocal] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -42,6 +44,7 @@ export function SettingsPage() {
   if (!settings) return null;
   const id = settings.activeProvider;
   const needsGeminiSetup = id === 'gemini' && !configured.includes('gemini');
+  const needsLocalSetup = id === 'ollama' && !settings.models.ollama && !manualLocal;
 
   const update = async (next: Settings) => {
     setSettings(next);
@@ -155,7 +158,10 @@ export function SettingsPage() {
                 onUseLocal={() => void update({ ...settings, activeProvider: 'ollama' })}
               />
             )}
-            {!needsGeminiSetup && (
+            {needsLocalSetup && (
+              <LocalSetup settings={settings} onDone={load} onManual={() => setManualLocal(true)} />
+            )}
+            {!needsGeminiSetup && !needsLocalSetup && (
               <>
                 {id === 'ollama' ? (
                   <div className="flex flex-col gap-1">
@@ -238,11 +244,9 @@ export function SettingsPage() {
             <div key={adapter.id} className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-medium">{adapter.displayName}</p>
-                <p className="text-xs text-muted-foreground">
-                  {adapter.compatibility === 'verified_live'
-                    ? 'Tested on the live site'
-                    : 'Tested against a local mock only, not the live site'}
-                </p>
+                {adapter.compatibility === 'verified_live' && (
+                  <p className="text-xs text-muted-foreground">Tested on the live site</p>
+                )}
               </div>
               <Switch
                 data-testid={`platform-${adapter.id}`}

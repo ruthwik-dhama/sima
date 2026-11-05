@@ -25,7 +25,7 @@
 
 Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with the AI provider you choose, and explains its reasoning. If your course allows it, Sima can also enter the answers for you to check before you submit.
 
-**Status: early development.** VHL Central now handles real activities, but it has only been tried on a few, so Sima still warns that it's untested there. Gradescope and WebAssign have only been tested against local mock pages. See [Known limitations](#known-limitations).
+**Status: early development.** VHL Central now handles real activities, but it has only been tried on a few. Gradescope and WebAssign have only been tested against local mock pages. See [Known limitations](#known-limitations).
 
 ## What Sima won't do
 
@@ -45,7 +45,7 @@ You need Chrome 127 or newer. Sima isn't on the Chrome Web Store, so you install
 4. Click **Load unpacked** and choose the unzipped folder.
 5. Click the puzzle-piece icon in the toolbar, then pin Sima.
 
-**Set up an AI provider:** click the Sima icon and enter your birth date. If you're 18 or older, Sima uses Google Gemini's free tier: click **Set up Gemini** and follow the short steps to copy a free key from Google and paste it in. If you're under 18, Sima uses a local model through Ollama, which keeps question text on your computer. Gemini's free tier isn't available in the EEA, Switzerland or the UK, so choose Ollama there. See the [privacy terms](docs/PRIVACY.md) and [provider guide](docs/PROVIDERS.md).
+**Set up an AI provider:** click the Sima icon on any site. Your birth date is the first thing it asks, and setting up AI is the second. If you're 18 or older, Sima uses Google Gemini's free tier: click **Set up Gemini** and follow the short steps to copy a free key from Google and paste it in. If you're under 18, Sima uses a local model through Ollama, which keeps question text on your computer. Gemini's free tier isn't available in the EEA, Switzerland or the UK, so choose Ollama there. See the [privacy terms](docs/PRIVACY.md) and [provider guide](docs/PROVIDERS.md).
 
 **Use it:** open an activity on a supported site, click the Sima icon, and click **Fill answers** or **Explain only**.
 
