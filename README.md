@@ -12,7 +12,25 @@ Sima is an open-source Chrome extension that helps you understand learning activ
 
 You're responsible for following your course's academic integrity policy. If you're unsure whether AI help is allowed, ask your instructor first.
 
-## Setup
+## Install
+
+You need Chrome 127 or newer. Sima isn't on the Chrome Web Store, so you install it in Developer mode.
+
+1. Download the latest `.zip` from the [Releases page](https://github.com/ruthwik-dhama/sima/releases/latest).
+2. Unzip it, and put the folder somewhere permanent. Chrome loads Sima from this folder, so deleting or moving it removes the extension.
+3. Go to `chrome://extensions` and turn on **Developer mode** at the top right.
+4. Click **Load unpacked** and choose the unzipped folder.
+5. Click the puzzle-piece icon in the toolbar, then pin Sima.
+
+**Set up an AI provider:** click the Sima icon, click the gear, choose a provider, and click **Save and test connection**. You can use a local model with Ollama, which keeps question text on your computer, or your own OpenAI, Anthropic or Gemini API key. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+
+**Use it:** open an activity on a supported site, click the Sima icon, and click **Fill answers** or **Explain only**.
+
+**Update it:** download the new `.zip`, replace the contents of the same folder, and click the reload arrow on the Sima card at `chrome://extensions`. Updates aren't automatic, so watch the repository's releases to hear about new versions.
+
+If you see "No questions recognized", Sima doesn't understand that page's layout yet: see [Known limitations](#known-limitations). The downloaded version can't open the mock activities, so to try those, build from source and follow [Try it on the mock platforms](#try-it-on-the-mock-platforms).
+
+## Build from source
 
 You need Node.js 22 or newer and Chrome 127 or newer.
 
