@@ -1,13 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { FileDown, LoaderCircle, ShieldAlert, Sparkles, Zap } from 'lucide-react';
-import type {
-  CaptureResult,
-  PageAnalysis,
-  ProviderId,
-  Settings,
-  Task,
-  TaskView,
-} from '@sima/shared-types';
+import type { CaptureResult, PageAnalysis, Task, TaskView } from '@sima/shared-types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { sendCommand } from '@/services/messaging';
@@ -21,7 +14,7 @@ export function Restricted({ analysis }: { analysis: PageAnalysis }) {
       <AlertDescription>
         <p>
           This looks like an exam, or an activity that doesn't allow outside help. Sima didn't read
-          its questions and sent nothing to an AI provider.
+          its questions and sent nothing to the AI.
         </p>
         <ul className="mt-1 list-disc pl-4">
           {analysis.restriction.signals.map((signal) => (
@@ -33,59 +26,6 @@ export function Restricted({ analysis }: { analysis: PageAnalysis }) {
   );
 }
 
-export function Disclosure({
-  providers,
-}: {
-  providers: Record<ProviderId, { name: string; origin: string; external: boolean }>;
-}) {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const load = () =>
-    sendCommand<{ settings: Settings }>({ type: 'GET_SETTINGS' }).then((r) =>
-      setSettings(r.settings),
-    );
-  // Reload after an error too, since the fix is often a change on the Settings page.
-  const panelError = useTaskStore((s) => s.error);
-  useEffect(() => void load(), [panelError]);
-  // Settings open in their own tab, so pick up changes made there.
-  useEffect(() => {
-    const onChanged = () => void load();
-    chrome.storage.onChanged.addListener(onChanged);
-    return () => chrome.storage.onChanged.removeListener(onChanged);
-  }, []);
-  if (!settings) return null;
-  const id = settings.activeProvider;
-  const provider = providers[id];
-  if (!provider.external || settings.acknowledgedProviders.includes(id)) return null;
-  return (
-    <Alert data-testid="provider-disclosure">
-      <AlertTitle>Question text will go to {provider.name}</AlertTitle>
-      <AlertDescription>
-        <p>
-          When you ask Sima to work through a question, its text, tables and image descriptions are
-          sent to {provider.origin} using your API key. Their data policy applies.
-        </p>
-        {id === 'gemini' && (
-          <p className="mt-1" data-testid="gemini-terms">
-            On Gemini's free tier, Google may use what's sent to improve its products, and human
-            reviewers may read it, so don't send personal information. It's only for people 18 or
-            older, and isn't available in the EEA, Switzerland or the UK.
-          </p>
-        )}
-        <Button
-          size="sm"
-          className="mt-2"
-          onClick={() =>
-            void sendCommand({ type: 'ACKNOWLEDGE_PROVIDER', provider: id }).then(load)
-          }
-        >
-          {id === 'gemini' ? "I understand, and I'm not in those regions" : 'I understand'}
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-/** Offered where Sima can't read a supported site's page, which is when a capture is needed. */
 export function CaptureLayout({ tabId }: { tabId: number }) {
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

@@ -1,29 +1,10 @@
-import { createProvider, type ModelProvider } from '@sima/model-providers';
-import { PROVIDER_ENDPOINTS, type ProviderId, type Settings } from '@sima/shared-types';
+import { createOllamaProvider } from '@sima/model-providers';
+import type { Settings } from '@sima/shared-types';
 import type { Reasoner } from '@sima/task-orchestrator';
-import { assertProviderAllowed, loadApiKey, loadSettings } from './settings';
+import { loadSettings } from './settings';
 
-export function providerOrigin(provider: ProviderId, settings: Settings): string {
-  return provider === 'ollama'
-    ? new URL(settings.ollamaBaseUrl).origin
-    : PROVIDER_ENDPOINTS[provider].origin;
-}
-
-export function originPattern(origin: string): string {
-  const url = new URL(origin);
-  return `${url.protocol}//${url.hostname}/*`;
-}
-
-export async function buildProvider(
-  provider: ProviderId,
-  settings: Settings,
-  sleep?: (ms: number) => Promise<void>,
-): Promise<ModelProvider> {
-  return createProvider(provider, {
-    apiKey: await loadApiKey(provider),
-    ...(provider === 'ollama' ? { baseUrl: settings.ollamaBaseUrl } : {}),
-    ...(sleep ? { sleep } : {}),
-  });
+export function ollamaProvider(settings: Settings, sleep?: (ms: number) => Promise<void>) {
+  return createOllamaProvider({ baseUrl: settings.ollamaBaseUrl, ...(sleep ? { sleep } : {}) });
 }
 
 const KEEP_ALIVE_MS = 20_000;
@@ -31,9 +12,9 @@ const KEEP_ALIVE_MS = 20_000;
 /**
  * Chrome stops an idle background worker after about 30 seconds, and waiting on a model doesn't
  * count as activity. A slow reply with the dropdown closed would otherwise be lost, so this makes
- * a harmless extension call regularly until the reply arrives.
+ * a harmless extension call regularly until the work finishes.
  */
-async function keepWorkerAlive<T>(work: () => Promise<T>): Promise<T> {
+export async function keepWorkerAlive<T>(work: () => Promise<T>): Promise<T> {
   const timer = setInterval(() => void chrome.runtime.getPlatformInfo(), KEEP_ALIVE_MS);
   try {
     return await work();
@@ -42,39 +23,20 @@ async function keepWorkerAlive<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Lives only in the background: API keys are never sent to a content script or page. */
+/** Sends questions only to Ollama on this computer. */
 export const reasoner: Reasoner = {
   async assertReady() {
     const settings = await loadSettings();
-    const id = settings.activeProvider;
-    assertProviderAllowed(settings, id);
-    const endpoint = PROVIDER_ENDPOINTS[id];
-    if (!settings.models[id]) throw new Error(`Choose a model for ${endpoint.name} in Settings.`);
-    if (id !== 'ollama' && !(await loadApiKey(id)))
-      throw new Error(`Add an API key for ${endpoint.name} in Settings.`);
-    if (endpoint.external && !settings.acknowledgedProviders.includes(id)) {
-      throw new Error(`Confirm that question text may be sent to ${endpoint.name} first.`);
-    }
-    const granted = await chrome.permissions.contains({
-      origins: [originPattern(providerOrigin(id, settings))],
-    });
-    if (!granted) throw new Error(`Allow Sima to reach ${endpoint.name} in Settings.`);
+    if (!settings.model) throw new Error('Finish setting up local AI in Sima first.');
   },
   async complete(prompt, schema, schemaName, hooks) {
     const settings = await loadSettings();
-    const id = settings.activeProvider;
-    assertProviderAllowed(settings, id);
-    const provider = await buildProvider(id, settings, async (ms) => {
+    const provider = ollamaProvider(settings, async (ms) => {
       await hooks?.onBusy?.();
       await new Promise((resolve) => setTimeout(resolve, ms));
     });
     return keepWorkerAlive(() =>
-      provider.completeStructured({
-        ...prompt,
-        schema,
-        schemaName,
-        model: settings.models[id] ?? '',
-      }),
+      provider.completeStructured({ ...prompt, schema, schemaName, model: settings.model }),
     );
   },
 };

@@ -7,18 +7,22 @@ describe.runIf(existsSync(path))('production manifest', () => {
   const manifest = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
 
   it('holds no development access', () => {
-    const text = JSON.stringify({
-      host: manifest.host_permissions,
-      scripts: manifest.content_scripts,
-    });
-    expect(text).not.toContain('localhost');
-    expect(text).not.toContain('127.0.0.1');
+    expect(JSON.stringify(manifest.content_scripts)).not.toMatch(/localhost|127\.0\.0\.1/);
+    expect(JSON.stringify(manifest.host_permissions)).not.toContain('5199');
   });
 
-  it('keeps provider and local-model access optional', () => {
-    expect(manifest.optional_host_permissions).toContain('https://api.openai.com/*');
-    expect(manifest.host_permissions).not.toContain('https://api.openai.com/*');
-    expect(manifest.host_permissions).toContain('https://generativelanguage.googleapis.com/*');
+  it('reaches only the supported platforms and Ollama on this computer', () => {
+    expect([...manifest.host_permissions].sort()).toEqual(
+      [
+        'https://*.gradescope.com/*',
+        'https://*.vhlcentral.com/*',
+        'https://*.webassign.net/*',
+        'http://localhost/*',
+        'http://127.0.0.1/*',
+      ].sort(),
+    );
+    expect(manifest.optional_host_permissions ?? []).toEqual([]);
+    expect(JSON.stringify(manifest)).not.toMatch(/openai|anthropic|googleapis/);
     expect(manifest.permissions.sort()).toEqual(['storage']);
   });
 

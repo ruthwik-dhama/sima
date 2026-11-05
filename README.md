@@ -23,7 +23,7 @@
   <img alt="Node 22+" src="https://img.shields.io/badge/Node-22%2B-black?style=flat-square">
 </p>
 
-Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with the AI provider you choose, and explains its reasoning. If your course allows it, Sima can also enter the answers for you to check before you submit.
+Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with an AI model running on your own computer, and explains its reasoning. It needs no account or API key, and question text never leaves your computer. If your course allows it, Sima can also enter the answers for you to check before you submit.
 
 **Status: early development.** VHL Central now handles real activities, but it has only been tried on a few. Gradescope and WebAssign have only been tested against local mock pages. See [Known limitations](#known-limitations).
 
@@ -45,7 +45,7 @@ You need Chrome 127 or newer. Sima isn't on the Chrome Web Store, so you install
 4. Click **Load unpacked** and choose the unzipped folder.
 5. Click the puzzle-piece icon in the toolbar, then pin Sima.
 
-**Set up an AI provider:** click the Sima icon on any site. Your birth date is the first thing it asks, and setting up AI is the second. If you're 18 or older, Sima uses Google Gemini's free tier: click **Set up Gemini** and follow the short steps to copy a free key from Google and paste it in. If you're under 18, Sima uses a local model through Ollama, which keeps question text on your computer. Gemini's free tier isn't available in the EEA, Switzerland or the UK, so choose Ollama there. See the [privacy terms](docs/PRIVACY.md) and [provider guide](docs/PROVIDERS.md).
+**Set up local AI:** click the Sima icon on any site. Setup is the first thing it shows: install the free [Ollama](https://ollama.com/download) app and open it, paste one command if Ollama asks you to allow Sima, then click to download the AI model (about 5 GB). Sima notices each step by itself. See the [local AI guide](docs/LOCAL-AI.md) and [privacy terms](docs/PRIVACY.md).
 
 **Use it:** open an activity on a supported site, click the Sima icon, and click **Fill answers** or **Explain only**.
 
@@ -68,11 +68,11 @@ Then load it in Chrome:
 
 1. Go to `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and choose `apps/extension/.output/chrome-mv3`.
-3. Click the Sima icon in the toolbar, enter your birth date, and set up a provider. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+3. Click the Sima icon in the toolbar and follow the local AI setup. See [docs/LOCAL-AI.md](docs/LOCAL-AI.md).
 
 ## Try it on the mock platforms
 
-The production build can't access localhost pages, so use the development build:
+The production build doesn't run on localhost pages, so use the development build:
 
 ```bash
 pnpm playground
@@ -102,25 +102,24 @@ pnpm test
 pnpm test:e2e
 ```
 
-End-to-end tests need Chromium once: `pnpm exec playwright install chromium`. They use a local fake model server, so no API key or model is needed.
+End-to-end tests need Chromium once: `pnpm exec playwright install chromium`. They use a local fake Ollama server, so no model is needed.
 
 ## Known limitations
 
 - **Live support is limited.** VHL Central has been tried on only a few real activities, so other layouts may not work. Gradescope and WebAssign adapters only understand the local mock pages, so their real pages show "Sima can't read this page yet". See [Testing on real sites](docs/TESTING-LIVE-SITES.md).
-- **Answers can be wrong, so check them.** Accuracy depends on the model. Gemini got every question right on one real VHL activity, while a small local model (`qwen2.5:7b`) got 14 of 24 on a local test set. These are small tests, not a guarantee.
-- **Gemini's free tier has limits.** Google doesn't publish fixed numbers, and Gemini can be busy at times. Sima retries when it is, but you may still have to try again later.
+- **Answers can be wrong, so check them.** Accuracy depends on the model you run. The default, `qwen2.5:7b`, got 14 of 24 on a local test set, and larger models usually do better. These are small tests, not a guarantee.
+- **Local AI needs a capable computer.** The default model needs about 5 GB of disk space and enough memory to run it, and answers are slower than online AI, especially without a fast graphics chip.
+- **Ollama may need one setting.** By default it refuses Chrome extensions, so setup asks you to paste a command, and on a Mac you repeat it after restarting the computer.
 - **Restriction detection is a heuristic.** It reads titles and visible text, so it can miss a restriction stated elsewhere, such as in a syllabus, or block a legitimate activity. A miss doesn't change your obligation to follow course rules.
 - **Images aren't sent to models.** Only their descriptions are, and confidence is capped when a description is missing.
 - **Only top-level documents are read.** Questions inside iframes aren't detected, and rich-text editors built on iframes can't be filled.
-- **API keys are stored unencrypted** in your Chrome profile, like most extensions' settings.
-- **OpenAI and Anthropic are untested on their live APIs.** Their requests are only tested with mocked responses. Gemini has been used on real activities, and automated tests run the Ollama path against a fake local server.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Privacy terms](docs/PRIVACY.md)
 - [Security](docs/SECURITY.md)
-- [AI providers](docs/PROVIDERS.md)
+- [Local AI](docs/LOCAL-AI.md)
 - [Testing on real sites](docs/TESTING-LIVE-SITES.md)
 - [Contributing](CONTRIBUTING.md)
 

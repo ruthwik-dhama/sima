@@ -73,7 +73,7 @@ export async function solveQuestion(
       feedback = `\n\nA previous attempt failed these checks. Correct them:\n- ${failed.join('\n- ')}`;
     } catch (error) {
       lastError = error;
-      // The provider already retried. Asking again only makes an outage or bad key take longer.
+      // Ollama already retried. Asking again only makes an outage or a missing model take longer.
       if ((error as { status?: number } | null)?.status !== undefined) break;
       feedback = '\n\nA previous attempt was unusable. Return only JSON matching the schema.';
     }

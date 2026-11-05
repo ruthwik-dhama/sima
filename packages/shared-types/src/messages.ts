@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ActionResultSchema, BrowserActionSchema } from './actions';
 import { ElementTargetSchema, PageAnalysisSchema } from './page';
-import { ProviderIdSchema, SettingsSchema } from './settings';
+import { SettingsSchema } from './settings';
 
 /** Messages from the dropdown, options page or floating UI to the background. */
 export const UiCommandSchema = z.discriminatedUnion('type', [
@@ -37,16 +37,11 @@ export const UiCommandSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('GET_SETTINGS') }),
   z.object({ type: z.literal('SAVE_SETTINGS'), settings: SettingsSchema }),
-  z.object({ type: z.literal('SET_BIRTH_DATE'), birthDate: z.string().max(10) }),
-  z.object({
-    type: z.literal('SET_API_KEY'),
-    provider: ProviderIdSchema,
-    apiKey: z.string().max(500),
-  }),
-  z.object({ type: z.literal('TEST_PROVIDER'), provider: ProviderIdSchema }),
-  z.object({ type: z.literal('ACKNOWLEDGE_PROVIDER'), provider: ProviderIdSchema }),
+  /** Finds Ollama and, if no model is chosen yet, picks an installed one. */
+  z.object({ type: z.literal('CHECK_OLLAMA') }),
+  /** Starts downloading the recommended model in the background. */
+  z.object({ type: z.literal('DOWNLOAD_MODEL') }),
   z.object({ type: z.literal('DELETE_TASK_DATA') }),
-  z.object({ type: z.literal('DELETE_API_KEYS') }),
   z.object({ type: z.literal('OPEN_POPUP') }),
   z.object({ type: z.literal('CAPTURE_PAGE'), tabId: z.number() }),
   z.object({ type: z.literal('DISMISS_FLOATING') }),

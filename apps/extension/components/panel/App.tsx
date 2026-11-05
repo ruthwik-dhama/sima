@@ -1,21 +1,17 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import logo from '@/assets/logo.png?inline';
 import { CircleAlert, Settings } from 'lucide-react';
 import { findAdapter } from '@sima/adapter-core';
-import {
-  PROVIDER_ENDPOINTS,
-  type ProviderId,
-  type Settings as SimaSettings,
-} from '@sima/shared-types';
-import { AgeGate } from '@/components/AgeGate';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import type { Settings as SimaSettings } from '@sima/shared-types';
+import { LocalSetup } from '@/components/LocalSetup';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { ADAPTERS } from '@/services/adapters';
 import { sendCommand } from '@/services/messaging';
 import { openSettings } from '@/services/open-settings';
 import { useTaskStore } from '@/stores/task-store';
-import { CaptureLayout, Controls, Disclosure, Restricted } from './Sections';
+import { CaptureLayout, Controls, Restricted } from './Sections';
 import { QuestionCard } from './QuestionCard';
 
 function isSupported(url: string): boolean {
@@ -26,47 +22,28 @@ function isSupported(url: string): boolean {
   }
 }
 
-function OnboardingFrame({ step, children }: { step: number; children: ReactNode }) {
+/** The first thing anyone sees, on any tab, until a local model is ready. */
+function Onboarding() {
   return (
     <div className="flex w-[380px] flex-col gap-4 bg-background p-5" data-testid="onboarding">
       <div className="flex items-center gap-2">
         <img src={logo} alt="" className="size-8 rounded-[8px]" />
         <h1 className="text-lg font-semibold">Welcome to Sima</h1>
-        <span className="ml-auto text-xs text-muted-foreground" data-testid="onboarding-step">
-          Step {step} of 2
-        </span>
       </div>
-      {children}
+      <LocalSetup />
+      <button
+        type="button"
+        className="self-start text-xs text-muted-foreground underline"
+        data-testid="open-settings"
+        onClick={openSettings}
+      >
+        Ollama uses a different address? Open settings
+      </button>
     </div>
   );
 }
 
-/** The second step, for whichever provider the birth date step chose. */
-function AiSetupStep({ provider }: { provider: ProviderId }) {
-  const local = provider === 'ollama';
-  const gemini = provider === 'gemini';
-  return (
-    <Alert data-testid="model-missing">
-      <AlertTitle>
-        {gemini ? 'Turn on free AI' : local ? 'Set up your free local AI' : 'Choose an AI model'}
-      </AlertTitle>
-      <AlertDescription>
-        <p>
-          {gemini
-            ? 'It takes about a minute, and no payment is needed.'
-            : local
-              ? 'The AI runs on this computer, so question text stays here. It takes a few minutes, mostly downloading.'
-              : `Sima needs a model for ${PROVIDER_ENDPOINTS[provider].name} before it can work through questions.`}
-        </p>
-        <Button size="sm" className="mt-2" data-testid="open-settings" onClick={openSettings}>
-          {gemini ? 'Set up Gemini' : local ? 'Set up local AI' : 'Open settings'}
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-/** Sima itself only appears once onboarding is finished, whichever tab it's opened on. */
+/** Sima itself only appears once local AI is set up, whichever tab it's opened on. */
 export function App() {
   const [settings, setSettings] = useState<SimaSettings | null>(null);
   const load = () =>
@@ -76,27 +53,16 @@ export function App() {
 
   useEffect(() => {
     void load();
-    // Setup finishes on the Settings page, in another tab.
-    const onChanged = () => void load();
+    // Setup finishes in the background, or on the Settings page in another tab.
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>) => {
+      if ('settings' in changes) void load();
+    };
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
   if (!settings) return <div className="h-40 w-[380px] bg-background" />;
-  if (settings.ageCheck === 'unset') {
-    return (
-      <OnboardingFrame step={1}>
-        <AgeGate onDone={() => void load()} />
-      </OnboardingFrame>
-    );
-  }
-  if (!settings.models[settings.activeProvider]) {
-    return (
-      <OnboardingFrame step={2}>
-        <AiSetupStep provider={settings.activeProvider} />
-      </OnboardingFrame>
-    );
-  }
+  if (!settings.model) return <Onboarding />;
   return <Panel />;
 }
 
@@ -211,7 +177,6 @@ function Panel() {
               </Alert>
             ))}
             {restricted && analysis && <Restricted analysis={analysis} />}
-            {!restricted && <Disclosure providers={PROVIDER_ENDPOINTS} />}
           </div>
         )}
 

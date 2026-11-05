@@ -1,15 +1,12 @@
 import { readFileSync } from 'node:fs';
 import type { BrowserContext, Page, Worker } from '@playwright/test';
 import {
-  ADULT_BIRTH_DATE,
   OLLAMA_PORT,
   expect,
   fillFirstTime,
-  MINOR_BIRTH_DATE,
   MOCK,
   onPage,
   openRow,
-  setBirthDate,
   status,
   test,
 } from './fixtures';
@@ -84,7 +81,7 @@ test.describe('foundation', () => {
     await expect(floating).toHaveCount(0);
   });
 
-  test('API keys are unreachable from the content script context', async ({
+  test('stored data and settings are unreachable from the content script context', async ({
     context,
     extensionId,
     openActivity,
@@ -93,7 +90,7 @@ test.describe('foundation', () => {
     await options.goto(`chrome-extension://${extensionId}/options.html`);
     await context
       .serviceWorkers()[0]!
-      .evaluate(() => chrome.storage.local.set({ 'apiKey:openai': 'sk-e2e-secret' }));
+      .evaluate(() => chrome.storage.local.set({ 'e2e-secret': 'sk-e2e-secret' }));
     const reply = await options.evaluate(() =>
       chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }),
     );
@@ -131,26 +128,22 @@ test.describe('foundation', () => {
     expect(String(direct.result.value)).toContain('denied');
     expect(String(direct.result.value)).not.toContain('sk-e2e-secret');
 
-    // Content scripts also can't use settings commands to change or read provider state.
+    // Content scripts also can't use settings commands, for example to point Sima elsewhere.
     const viaMessage = await evaluate(
-      `chrome.runtime.sendMessage({ type: 'SET_API_KEY', provider: 'openai', apiKey: 'overwritten' }).then(r => JSON.stringify(r), e => 'denied: ' + e.message)`,
+      `chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { model: 'evil', ollamaBaseUrl: 'http://localhost:1', disabledPlatforms: [], floatingEnabled: true } }).then(r => JSON.stringify(r), e => 'denied: ' + e.message)`,
     );
     expect(String(viaMessage.result.value)).toMatch(/"ok":false|denied/);
     const worker = context.serviceWorkers()[0]!;
-    const stored = await worker.evaluate(() => chrome.storage.local.get('apiKey:openai'));
-    expect(stored['apiKey:openai']).toBe('sk-e2e-secret');
+    const stored = await worker.evaluate(() => chrome.storage.local.get('settings'));
+    expect((stored.settings as { model: string }).model).toBe('fake-model');
   });
 
   test('settings reject a non-local Ollama address', async ({ context, extensionId }) => {
     const options = await context.newPage();
     await options.goto(`chrome-extension://${extensionId}/options.html`);
-    await setBirthDate(options, MINOR_BIRTH_DATE);
-    await options.reload();
-    await options.getByTestId('local-manual').click();
     await options.getByTestId('ollama-url').fill('https://attacker.example');
     await expect(options.getByTestId('settings-message')).toBeVisible();
     await options.reload();
-    await options.getByTestId('local-manual').click();
     await expect(options.getByTestId('ollama-url')).not.toHaveValue('https://attacker.example');
   });
 
@@ -163,7 +156,7 @@ test.describe('foundation', () => {
     const options = await context.newPage();
     await options.goto(`chrome-extension://${extensionId}/options.html`);
     await options.getByTestId('test-connection').click();
-    await expect(options.getByTestId('settings-message')).toContainText('1 models available');
+    await expect(options.getByTestId('settings-message')).toContainText('1 models installed');
   });
 });
 
@@ -855,7 +848,8 @@ test('turning a platform off stops Sima acting on it', async ({
   void page;
 });
 
-test.describe('birth date and default provider', () => {
+test.describe('onboarding and local AI setup', () => {
+  /** A dropdown on an activity, for someone who has never set Sima up. */
   async function freshPanel(context: BrowserContext, extensionId: string, worker: Worker) {
     const page = await context.newPage();
     await page.goto(`${MOCK}/vhl/activity.html?page=1`);
@@ -865,452 +859,221 @@ test.describe('birth date and default provider', () => {
     }, page.url());
     const panel = await context.newPage();
     await panel.goto(`chrome-extension://${extensionId}/popup.html?tabId=${tabId}`);
-    return panel;
+    return { page, panel };
   }
 
-  test('a new user sees only the birth date step, and nothing can run before it', async ({
+  /** Points Sima at an Ollama address before setup, like a user with a non-standard install. */
+  async function useAddress(page: Page, url: string) {
+    await page.evaluate(async (address) => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_SETTINGS',
+        settings: { ...data.settings, ollamaBaseUrl: address },
+      });
+    }, url);
+  }
+
+  const FAKE = `http://127.0.0.1:${OLLAMA_PORT}`;
+  const CLOSED = 'http://127.0.0.1:11498';
+
+  const savedModel = async (page: Page) =>
+    page.evaluate(async () => {
+      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      return data.settings.model as string;
+    });
+
+  test('a new user sees only local AI setup, and nothing can run before it', async ({
     context,
     extensionId,
     worker,
     model,
   }) => {
-    const panel = await freshPanel(context, extensionId, worker);
+    const { page, panel } = await freshPanel(context, extensionId, worker);
+    await useAddress(panel, CLOSED);
     await expect(panel.getByTestId('onboarding')).toContainText('Welcome to Sima');
-    await expect(panel.getByTestId('age-gate')).toBeVisible();
+    await expect(panel.getByTestId('local-setup')).toContainText('no account or key');
+    await expect(panel.getByTestId('local-install')).toBeVisible();
     await expect(panel.getByTestId('solve-all')).toHaveCount(0);
-    await expect(panel.getByTestId('activity-title')).toHaveCount(0);
     await expect(panel.getByTestId('open-settings-gear')).toHaveCount(0);
+    await expect(panel.getByText(/birth date|API key|Gemini/i)).toHaveCount(0);
 
     // The background refuses too, without going through the panel.
-    const page = context.pages().find((open) => open.url().includes('/vhl/activity.html'));
     const reply = await panel.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
       await chrome.runtime.sendMessage({ type: 'ANALYZE', tabId: tab?.id });
       const view = await chrome.runtime.sendMessage({ type: 'GET_VIEW', tabId: tab?.id });
       return chrome.runtime.sendMessage({ type: 'SOLVE', taskId: view.data.task.id });
-    }, page?.url() ?? '');
+    }, page.url());
     expect(reply.ok).toBe(false);
-    expect(reply.error).toContain('birth date');
+    expect(reply.error).toContain('local AI');
     expect(model.requests).toEqual([]);
 
-    // Answering it goes straight into Sima, on the same activity.
-    await panel.getByTestId('birth-date').fill(MINOR_BIRTH_DATE);
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('onboarding-step')).toContainText('Step 2 of 2');
-    await expect(panel.getByTestId('model-missing')).toContainText('local AI');
-    await expect(panel.getByTestId('solve-all')).toHaveCount(0);
-
-    // Finishing setup, which happens in another tab, goes straight into Sima on this activity.
-    await panel.evaluate(async () => {
-      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await chrome.runtime.sendMessage({
-        type: 'SAVE_SETTINGS',
-        settings: { ...data.settings, models: { ...data.settings.models, ollama: 'fake-model' } },
-      });
-    });
-    await expect(panel.getByTestId('onboarding')).toHaveCount(0);
+    // Opening Ollama, here by pointing at the running one, moves on with no click at all.
+    await useAddress(panel, FAKE);
+    await expect(panel.getByTestId('onboarding')).toHaveCount(0, { timeout: 10000 });
+    expect(await savedModel(panel)).toBe('fake-model');
     await expect(panel.getByTestId('activity-title')).toBeVisible();
     await expect(panel.getByTestId('solve-all')).toBeVisible();
   });
 
-  test('the birth date step comes first on a site Sima does not support', async ({
+  test('onboarding comes first on a site Sima does not support', async ({
     context,
     extensionId,
-    worker,
   }) => {
-    const page = await context.newPage();
-    await page.goto(`${MOCK}/`);
-    const tabId = await worker.evaluate(async (url) => {
-      const [tab] = await chrome.tabs.query({ url });
-      return tab?.id as number;
-    }, page.url());
     const panel = await context.newPage();
-    await panel.goto(`chrome-extension://${extensionId}/popup.html?tabId=${tabId}`);
-    await expect(panel.getByTestId('age-gate')).toBeVisible();
+    await panel.goto(`chrome-extension://${extensionId}/popup.html?tabId=999999`);
+    await expect(panel.getByTestId('local-setup')).toBeVisible();
     await expect(panel.getByTestId('empty-state')).toHaveCount(0);
-
-    await panel.getByTestId('birth-date').fill(ADULT_BIRTH_DATE);
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('model-missing')).toContainText('Turn on free AI');
-    await expect(panel.getByTestId('empty-state')).toHaveCount(0);
-    await panel.reload();
-    await expect(panel.getByTestId('model-missing')).toBeVisible();
-    await expect(panel.getByTestId('age-gate')).toHaveCount(0);
-
-    await panel.evaluate(async () => {
-      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await chrome.runtime.sendMessage({
-        type: 'SAVE_SETTINGS',
-        settings: { ...data.settings, models: { ...data.settings.models, gemini: 'g' } },
-      });
-    });
-    await expect(panel.getByTestId('empty-state')).toContainText('No supported activity');
   });
 
-  test('18 or older gets Gemini by default, with the setup and terms shown', async ({
+  test('a fresh Ollama gets the model from the dropdown, which can close meanwhile', async ({
     context,
     extensionId,
     worker,
-  }) => {
-    const panel = await freshPanel(context, extensionId, worker);
-    await panel.getByTestId('birth-date').fill(ADULT_BIRTH_DATE);
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('model-missing')).toContainText('Turn on free AI');
-
-    const opened = context.waitForEvent('page');
-    await panel.getByTestId('open-settings').click();
-    const settings = await opened;
-    await settings.waitForLoadState();
-    await expect(settings.getByTestId('provider-select')).toContainText('Google Gemini');
-    await expect(settings.getByTestId('gemini-setup')).toContainText('18 or older');
-    await expect(settings.getByTestId('gemini-setup')).toContainText('EEA, Switzerland or the UK');
-    await expect(settings.getByTestId('privacy-summary')).toContainText('EEA, Switzerland');
-
-    // Adults can still choose the local model.
-    await settings.getByTestId('provider-select').click();
-    await settings.getByRole('option', { name: 'Ollama (local)' }).click();
-    await expect(settings.getByTestId('local-setup')).toBeVisible();
-  });
-
-  test('under 18 gets Ollama, and online providers stay refused', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const panel = await freshPanel(context, extensionId, worker);
-    await panel.getByTestId('birth-date').fill(MINOR_BIRTH_DATE);
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('model-missing')).toContainText('local AI');
-
-    const opened = context.waitForEvent('page');
-    await panel.getByTestId('open-settings').click();
-    const settings = await opened;
-    await settings.waitForLoadState();
-    await expect(settings.getByTestId('minor-note')).toBeVisible();
-    await settings.getByTestId('provider-select').click();
-    await expect(settings.getByRole('option', { name: 'Google Gemini' })).toHaveCount(0);
-    await settings.keyboard.press('Escape');
-
-    // Going around the UI is refused too, and the answer can't be changed.
-    const replies = await settings.evaluate(async (adultDate) => {
-      const send = (message: unknown) => chrome.runtime.sendMessage(message);
-      const current = await send({ type: 'GET_SETTINGS' });
-      return {
-        retry: await send({ type: 'SET_BIRTH_DATE', birthDate: adultDate }),
-        forced: await send({
-          type: 'SAVE_SETTINGS',
-          settings: { ...current.data.settings, activeProvider: 'gemini', ageCheck: 'adult' },
-        }),
-        key: await send({ type: 'SET_API_KEY', provider: 'gemini', apiKey: 'k' }),
-        test: await send({ type: 'TEST_PROVIDER', provider: 'gemini' }),
-        after: await send({ type: 'GET_SETTINGS' }),
-      };
-    }, ADULT_BIRTH_DATE);
-    expect(replies.retry.ok).toBe(false);
-    expect(replies.forced.ok).toBe(false);
-    expect(replies.key.ok).toBe(false);
-    expect(replies.test.ok).toBe(false);
-    expect(replies.after.data.settings).toMatchObject({
-      ageCheck: 'minor',
-      activeProvider: 'ollama',
-    });
-  });
-
-  test('never stores the birth date, and rejects dates that are not real', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const panel = await freshPanel(context, extensionId, worker);
-    await panel.getByTestId('birth-date').fill('2999-01-01');
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('age-gate-error')).toContainText('real birth date');
-    await panel.getByTestId('birth-date').fill(ADULT_BIRTH_DATE);
-    await panel.getByTestId('birth-date-submit').click();
-    await expect(panel.getByTestId('age-gate')).toHaveCount(0);
-    const stored = await worker.evaluate(() => chrome.storage.local.get(null));
-    expect(JSON.stringify(stored)).not.toContain(ADULT_BIRTH_DATE);
-    expect(JSON.stringify(stored)).toContain('"ageCheck":"adult"');
-  });
-
-  test('the Gemini notice states the age and Europe rules before anything is sent', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const panel = await freshPanel(context, extensionId, worker);
-    await setBirthDate(panel, ADULT_BIRTH_DATE);
-    await panel.evaluate(async () => {
-      const current = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      const { settings } = current.data;
-      await chrome.runtime.sendMessage({
-        type: 'SAVE_SETTINGS',
-        settings: { ...settings, models: { ...settings.models, gemini: 'some-model' } },
-      });
-    });
-    await panel.reload();
-    await expect(panel.getByTestId('gemini-terms')).toContainText('18 or older');
-    await expect(panel.getByTestId('gemini-terms')).toContainText('EEA, Switzerland or the UK');
-    await expect(panel.getByTestId('provider-disclosure')).toContainText('human');
-  });
-});
-
-test.describe('Gemini setup', () => {
-  const GOOD_KEY = 'test-key-AbCdEfGhIjKlMnOpQrSt';
-  const NO_REGION_KEY = 'test-key-UnsupportedLocation-000';
-
-  /** Stands in for Google, in the worker, so the extension's whole request path still runs. */
-  async function fakeGoogle(worker: Worker) {
-    await worker.evaluate(
-      ([goodKey, noRegionKey]) => {
-        const target = globalThis as unknown as { sentKeys: string[] };
-        target.sentKeys = [];
-        globalThis.fetch = (async (_url: string, init: RequestInit) => {
-          const key = (init.headers as Record<string, string>)['x-goog-api-key'] ?? '';
-          target.sentKeys.push(key);
-          if (key === noRegionKey) {
-            return new Response('{"error":{"message":"User location is not supported"}}', {
-              status: 400,
-            });
-          }
-          if (key !== goodKey) {
-            return new Response('{"error":{"message":"API key not valid"}}', { status: 400 });
-          }
-          return new Response(
-            JSON.stringify({
-              models: ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.8-flash-tts'].map(
-                (id) => ({
-                  name: `models/${id}`,
-                  supportedGenerationMethods: ['generateContent'],
-                }),
-              ),
-            }),
-          );
-        }) as unknown as typeof fetch;
-      },
-      [GOOD_KEY, NO_REGION_KEY],
-    );
-  }
-
-  async function freshSettings(context: BrowserContext, extensionId: string, worker: Worker) {
-    await fakeGoogle(worker);
-    await context.route('https://aistudio.google.com/**', (route) =>
-      route.fulfill({ contentType: 'text/html', body: '<h1>AI Studio stand-in</h1>' }),
-    );
-    const settings = await context.newPage();
-    await settings.goto(`chrome-extension://${extensionId}/options.html`);
-    await setBirthDate(settings, ADULT_BIRTH_DATE);
-    await settings.reload();
-    return settings;
-  }
-
-  const paste = (page: Page, text: string) =>
-    page.getByTestId('gemini-key').evaluate((input, value) => {
-      const clipboardData = new DataTransfer();
-      clipboardData.setData('text', value);
-      input.dispatchEvent(
-        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
-      );
-    }, text);
-
-  const storedKey = async (worker: Worker) =>
-    (await worker.evaluate(() => chrome.storage.local.get('apiKey:gemini')))['apiKey:gemini'];
-
-  test('one click opens Google, and pasting finishes setup with no other steps', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    const agreement = settings.getByTestId('gemini-agreement');
-    await expect(agreement).toContainText('18 or older');
-    await expect(agreement).toContainText('EEA, Switzerland');
-    await expect(agreement).toContainText('human reviewers');
-    await expect(settings.getByTestId('test-connection')).toHaveCount(0);
-
-    const opened = context.waitForEvent('page');
-    await settings.getByTestId('gemini-agree').click();
-    const google = await opened;
-    await google.waitForLoadState();
-    expect(google.url()).toContain('aistudio.google.com/apikey');
-    await settings.bringToFront();
-
-    await expect(settings.getByTestId('gemini-steps')).toContainText('Create project');
-    await expect(settings.getByTestId('gemini-key')).toBeFocused();
-    await paste(settings, `  ${GOOD_KEY}\n`);
-    await expect(settings.getByTestId('gemini-ready')).toContainText("You're all set");
-
-    const state = await settings.evaluate(() =>
-      chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }),
-    );
-    expect(JSON.stringify(state)).toContain('"gemini":"gemini-3.8-flash"');
-    expect(JSON.stringify(state)).toContain('"acknowledgedProviders":["gemini"]');
-    expect(JSON.stringify(state)).not.toContain(GOOD_KEY);
-    expect(await storedKey(worker)).toBe(GOOD_KEY);
-
-    // Google's API needs no extra Chrome prompt.
-    const granted = await worker.evaluate(() =>
-      chrome.permissions.contains({ origins: ['https://generativelanguage.googleapis.com/*'] }),
-    );
-    expect(granted).toBe(true);
-  });
-
-  test('a wrong key is explained simply, and not kept', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    await settings.getByTestId('gemini-agree').click();
-    await settings.bringToFront();
-    await paste(settings, 'wrong-key-wrong-key-wrong-key');
-    const error = settings.getByTestId('gemini-setup-error');
-    await expect(error).toContainText("That key didn't work");
-    await expect(error).not.toContainText('400');
-    expect(await storedKey(worker)).toBeUndefined();
-
-    await paste(settings, GOOD_KEY);
-    await expect(settings.getByTestId('gemini-ready')).toBeVisible();
-  });
-
-  test('a region Google refuses points to the local option', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    await settings.getByTestId('gemini-agree').click();
-    await settings.bringToFront();
-    await paste(settings, NO_REGION_KEY);
-    await expect(settings.getByTestId('gemini-setup-error')).toContainText('local model');
-    expect(await storedKey(worker)).toBeUndefined();
-  });
-
-  test('something that is not a key never leaves the page', async ({
-    context,
-    extensionId,
-    worker,
-  }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    await settings.getByTestId('gemini-agree').click();
-    await settings.bringToFront();
-    await paste(settings, 'my grocery list and other private text');
-    await expect(settings.getByTestId('gemini-setup-error')).toContainText(
-      "doesn't look like a key",
-    );
-    const sent = await worker.evaluate(
-      () => (globalThis as unknown as { sentKeys: string[] }).sentKeys,
-    );
-    expect(sent).toEqual([]);
-    await expect(settings.getByTestId('gemini-key')).toHaveValue('');
-  });
-
-  test('typing a key and pressing Enter also works', async ({ context, extensionId, worker }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    await settings.getByTestId('gemini-agree').click();
-    await settings.bringToFront();
-    await settings.getByTestId('gemini-key').fill(GOOD_KEY);
-    await settings.getByTestId('gemini-key').press('Enter');
-    await expect(settings.getByTestId('gemini-ready')).toBeVisible();
-  });
-
-  test('setup offers the local model instead', async ({ context, extensionId, worker }) => {
-    const settings = await freshSettings(context, extensionId, worker);
-    await settings.getByTestId('gemini-use-local').click();
-    await expect(settings.getByTestId('local-setup')).toBeVisible();
-    await expect(settings.getByTestId('gemini-setup')).toHaveCount(0);
-  });
-});
-
-test.describe('local AI setup', () => {
-  async function under18Settings(
-    context: BrowserContext,
-    extensionId: string,
-    baseUrl = `http://127.0.0.1:${OLLAMA_PORT}`,
-  ) {
-    const settings = await context.newPage();
-    await settings.goto(`chrome-extension://${extensionId}/options.html`);
-    await setBirthDate(settings, MINOR_BIRTH_DATE);
-    await settings.evaluate(async (url) => {
-      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await chrome.runtime.sendMessage({
-        type: 'SAVE_SETTINGS',
-        settings: { ...data.settings, ollamaBaseUrl: url },
-      });
-    }, baseUrl);
-    await settings.reload();
-    return settings;
-  }
-
-  const savedModel = async (settings: Page) =>
-    settings.evaluate(async () => {
-      const { data } = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      return data.settings.models.ollama as string;
-    });
-
-  test('under 18 is led to Ollama, then Sima downloads the model', async ({
-    context,
-    extensionId,
     model,
   }) => {
     model.installed = [];
     await context.route('https://ollama.com/**', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<h1>Ollama stand-in</h1>' }),
     );
-    const settings = await under18Settings(context, extensionId);
-    await expect(settings.getByTestId('model')).toHaveCount(0);
-
+    const { panel } = await freshPanel(context, extensionId, worker);
+    await useAddress(panel, CLOSED);
     const opened = context.waitForEvent('page');
-    await settings.getByTestId('ollama-download').click();
+    await panel.getByTestId('ollama-download').click();
     expect((await opened).url()).toContain('ollama.com/download');
-    await settings.bringToFront();
 
-    await settings.getByTestId('ollama-ready').click();
-    await expect(settings.getByTestId('local-model-step')).toContainText('5 GB');
-    await settings.getByTestId('ollama-pull').click();
-    await expect(settings.getByTestId('local-ready')).toContainText("You're all set");
+    await useAddress(panel, FAKE);
+    await expect(panel.getByTestId('local-model-step')).toContainText('5 GB');
+    model.pullDelayMs = 2000;
+    await panel.getByTestId('ollama-pull').click();
+    await expect(panel.getByTestId('local-downloading')).toBeVisible();
+    // The dropdown closes when the user clicks elsewhere. The download carries on without it.
+    await panel.close();
+    await expect
+      .poll(
+        () =>
+          worker.evaluate(async () => {
+            const { settings } = await chrome.storage.local.get('settings');
+            return (settings as { model?: string } | undefined)?.model;
+          }),
+        { timeout: 15000 },
+      )
+      .toBe('qwen2.5:7b');
     expect(model.pulled).toEqual(['qwen2.5:7b']);
+
+    const again = await context.newPage();
+    await again.goto(`chrome-extension://${extensionId}/popup.html?tabId=999999`);
+    await expect(again.getByTestId('onboarding')).toHaveCount(0);
+  });
+
+  test('a download that fails can be tried again', async ({ context, extensionId, model }) => {
+    model.installed = [];
+    model.pullFails = true;
+    const settings = await context.newPage();
+    await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await useAddress(settings, FAKE);
+    await settings.getByTestId('ollama-pull').click();
+    await expect(settings.getByTestId('local-setup-error')).toContainText('download stopped');
+    model.pullFails = false;
+    await settings.getByTestId('ollama-pull').click();
+    await expect(settings.getByTestId('local-setup')).toHaveCount(0, { timeout: 10000 });
     expect(await savedModel(settings)).toBe('qwen2.5:7b');
   });
 
-  test('a model already in Ollama is used without another download', async ({
+  test('when Ollama refuses Sima, setup shows the fix and moves on once it is applied', async ({
     context,
     extensionId,
     model,
   }) => {
-    const settings = await under18Settings(context, extensionId);
-    await settings.getByTestId('ollama-ready').click();
-    await expect(settings.getByTestId('local-ready')).toBeVisible();
-    expect(model.pulled).toEqual([]);
+    model.refuseExtensions = true;
+    const settings = await context.newPage();
+    await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await useAddress(settings, FAKE);
+    await expect(settings.getByTestId('ollama-command')).toContainText(
+      `"chrome-extension://${extensionId}"`,
+    );
+    expect(await savedModel(settings)).toBe('');
+
+    // After the user runs the command and restarts Ollama, Sima notices by itself.
+    model.refuseExtensions = false;
+    await expect(settings.getByTestId('local-setup')).toHaveCount(0, { timeout: 10000 });
     expect(await savedModel(settings)).toBe('fake-model');
   });
 
-  test('when Ollama is not open, it says so and can try again', async ({
+  test('a refused Ollama says how to fix it, on the question and in Settings', async ({
     context,
     extensionId,
+    openActivity,
     model,
   }) => {
-    void model;
-    const settings = await under18Settings(context, extensionId, 'http://127.0.0.1:11498');
-    await settings.getByTestId('ollama-ready').click();
-    const error = settings.getByTestId('local-setup-error');
-    await expect(error).toContainText("can't find Ollama");
-    await expect(error).not.toContainText('reach provider');
-    await expect(settings.getByTestId('ollama-ready')).toBeEnabled();
-    expect(await savedModel(settings)).toBe('');
+    const { panel } = await openActivity('/gradescope/assignment.html');
+    await status(panel, 'ready');
+    model.refuseExtensions = true;
+    await panel.getByTestId('solve-all').click();
+    const error = panel.getByTestId('solve-error-q1');
+    await expect(error).toContainText('Ollama is blocking Sima', { timeout: 15000 });
+    await expect(error).not.toContainText('403');
+    expect(model.requests).toEqual([]);
+
+    const settings = await context.newPage();
+    await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await expect(settings.getByTestId('ollama-command')).toContainText(extensionId);
+
+    model.refuseExtensions = false;
+    await settings.getByTestId('ollama-recheck').click();
+    await expect(settings.getByTestId('ollama-blocked')).toHaveCount(0);
   });
 
-  test('entering the address and model by hand stays possible', async ({
+  test('the address and model can be set by hand', async ({ context, extensionId, model }) => {
+    void model;
+    const settings = await context.newPage();
+    await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await useAddress(settings, CLOSED);
+    await expect(settings.getByTestId('local-install')).toBeVisible();
+    await settings.getByTestId('ollama-url').fill(FAKE);
+    await settings.getByTestId('model').fill('my-model');
+    await expect(settings.getByTestId('local-setup')).toHaveCount(0);
+    expect(await savedModel(settings)).toBe('my-model');
+  });
+
+  test('settings and keys from builds with online providers are cleaned up', async ({
     context,
     extensionId,
-    model,
+    worker,
   }) => {
-    void model;
-    const settings = await under18Settings(context, extensionId);
-    await settings.getByTestId('local-manual').click();
-    await expect(settings.getByTestId('ollama-url')).toBeVisible();
-    await settings.getByTestId('model').fill('fake-model');
-    await expect(settings.getByTestId('local-setup')).toHaveCount(0);
+    await worker.evaluate(() =>
+      chrome.storage.local.set({
+        'apiKey:gemini': 'old-key',
+        'apiKey:openai': 'old-key',
+        settings: {
+          activeProvider: 'gemini',
+          models: { openai: '', anthropic: '', gemini: 'g', ollama: 'fake-model' },
+          ollamaBaseUrl: 'http://127.0.0.1:11499',
+          disabledPlatforms: [],
+          acknowledgedProviders: ['gemini'],
+          floatingEnabled: true,
+          ageCheck: 'adult',
+        },
+      }),
+    );
+    // Restart the worker, as a browser restart or an update would.
+    const cdp = await context
+      .browser()
+      ?.newBrowserCDPSession()
+      .catch(() => null);
+    const page = await context.newPage();
+    const browserCdp = cdp ?? (await context.newCDPSession(page));
+    const { targetInfos } = await browserCdp.send('Target.getTargets');
+    const sw = targetInfos.find((t) => t.type === 'service_worker' && t.url.includes(extensionId));
+    await browserCdp.send('Target.closeTarget', { targetId: sw!.targetId });
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+    await expect(page.getByTestId('model')).toHaveValue('fake-model');
+    for (const gone of ['api-key', 'provider-select', 'gemini-setup', 'age-gate', 'delete-keys'])
+      await expect(page.getByTestId(gone)).toHaveCount(0);
+    await expect(page.getByText(/Gemini|birth date/i)).toHaveCount(0);
+
+    const keys = await page.evaluate(() => chrome.storage.local.get(null));
+    expect(Object.keys(keys).filter((k) => k.startsWith('apiKey:'))).toEqual([]);
   });
 });
 
