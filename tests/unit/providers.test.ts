@@ -135,6 +135,17 @@ describe('busy providers', () => {
     for (const response of responses) fn.mockResolvedValueOnce(response);
     return fn as unknown as typeof fetch & ReturnType<typeof vi.fn>;
   };
+  const modelList = () =>
+    new Response(
+      JSON.stringify({
+        models: [
+          'gemini-3.8-flash',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash-lite',
+          'gemini-4-argon',
+        ].map((id) => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })),
+      }),
+    );
 
   it('retries after a 503, then succeeds', async () => {
     const f = queue(busy(), ok('ollama'));
@@ -169,21 +180,79 @@ describe('busy providers', () => {
     expect(f).toHaveBeenCalledOnce();
   });
 
-  it('moves a busy Gemini request to another free model', async () => {
-    const models = {
-      models: [
-        'gemini-3.8-flash',
-        'gemini-3.6-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-4-argon',
-      ].map((id) => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })),
-    };
-    const f = queue(busy(), busy(), busy(), new Response(JSON.stringify(models)), ok('gemini'));
-    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep: noWait });
+  it('moves a busy Gemini request straight to another free model', async () => {
+    const sleep = vi.fn(async () => {});
+    const attempts: unknown[] = [];
+    const f = queue(busy(503), modelList(), ok('gemini'));
+    const provider = createProvider('gemini', {
+      apiKey: KEY,
+      fetch: f,
+      sleep,
+      onAttempt: ({ model, status }) => void attempts.push([model, status]),
+    });
     expect(await provider.completeStructured({ ...request, model: 'gemini-3.8-flash' })).toEqual(
       result,
     );
-    expect(String(f.mock.calls[4]?.[0])).toContain('gemini-3.6-flash');
+    expect(String(f.mock.calls[2]?.[0])).toContain('gemini-3.6-flash');
+    // No waiting at all when another model can answer.
+    expect(sleep).not.toHaveBeenCalled();
+    expect(attempts).toEqual([
+      ['gemini-3.8-flash', 503],
+      ['gemini-3.6-flash', 200],
+    ]);
+  });
+
+  it('ignores a long retry-after on Gemini when another model can answer', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(429, { 'retry-after': '60' }), modelList(), ok('gemini'));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep });
+    await provider.completeStructured({ ...request, model: 'gemini-3.8-flash' });
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('pauses once and tries again when every Gemini model is overloaded', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(503), modelList(), busy(503), busy(503), busy(503), ok('gemini'));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep });
+    expect(await provider.completeStructured({ ...request, model: 'gemini-3.8-flash' })).toEqual(
+      result,
+    );
+    expect(sleep.mock.calls).toEqual([[3000]]);
+    expect(String(f.mock.calls[5]?.[0])).toContain('gemini-3.6-flash');
+  });
+
+  it('gives up on Gemini after the second round, with a plain message', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(503), modelList(), busy(503), busy(503), busy(503), busy(503), busy(503));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep });
+    const error = await provider
+      .completeStructured({ ...request, model: 'gemini-3.8-flash' })
+      .catch((e: unknown) => e);
+    expect(isBusy(error)).toBe(true);
+    expect(f).toHaveBeenCalledTimes(7);
+    expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it('does not wait or repeat when every Gemini model is rate limited', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(429), modelList(), busy(429), busy(429));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep });
+    const error = await provider
+      .completeStructured({ ...request, model: 'gemini-3.8-flash' })
+      .catch((e: unknown) => e);
+    expect((error as Error).message).toContain('limit');
+    expect(f).toHaveBeenCalledTimes(4);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('still answers from the same model if the model list cannot be read', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(503), busy(503), ok('gemini'));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep });
+    expect(await provider.completeStructured({ ...request, model: 'gemini-3.8-flash' })).toEqual(
+      result,
+    );
+    expect(sleep).toHaveBeenCalledOnce();
   });
 
   it('ranks fallbacks: full Flash models, then Flash-Lite, never paid-only or special models', () => {

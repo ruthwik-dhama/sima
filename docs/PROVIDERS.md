@@ -23,7 +23,7 @@ Sima sends a page's questions together in one request, or several on a very long
 
 ## When a provider is busy
 
-If a provider reports it's overloaded or rate limited, Sima waits and retries twice. On Gemini it then tries up to two other free Flash models, so the answer may come from a different model than the one in Settings. If that fails too, Sima stops asking and shows a plain message, and clicking the button again solves whatever is left.
+If a provider reports it's overloaded or rate limited, Sima waits and retries twice. Gemini works differently: Sima moves straight to up to two other free Flash models, so the answer may come from a different model than the one in Settings. If they're all overloaded, it pauses once for 3 seconds and tries them again. If that fails too, or the problem is a rate limit, Sima stops asking and shows a plain message, and clicking the button again solves whatever is left.
 
 ## Ollama
 

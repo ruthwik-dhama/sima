@@ -1,4 +1,4 @@
-import { createProvider, type ModelProvider } from '@sima/model-providers';
+import { createProvider, type ModelAttempt, type ModelProvider } from '@sima/model-providers';
 import { PROVIDER_ENDPOINTS, type ProviderId, type Settings } from '@sima/shared-types';
 import type { Reasoner } from '@sima/task-orchestrator';
 import { assertProviderAllowed, loadApiKey, loadSettings } from './settings';
@@ -18,11 +18,13 @@ export async function buildProvider(
   provider: ProviderId,
   settings: Settings,
   sleep?: (ms: number) => Promise<void>,
+  onAttempt?: (attempt: ModelAttempt) => void | Promise<void>,
 ): Promise<ModelProvider> {
   return createProvider(provider, {
     apiKey: await loadApiKey(provider),
     ...(provider === 'ollama' ? { baseUrl: settings.ollamaBaseUrl } : {}),
     ...(sleep ? { sleep } : {}),
+    ...(onAttempt ? { onAttempt } : {}),
   });
 }
 
@@ -64,10 +66,19 @@ export const reasoner: Reasoner = {
     const settings = await loadSettings();
     const id = settings.activeProvider;
     assertProviderAllowed(settings, id);
-    const provider = await buildProvider(id, settings, async (ms) => {
-      await hooks?.onBusy?.();
-      await new Promise((resolve) => setTimeout(resolve, ms));
-    });
+    const provider = await buildProvider(
+      id,
+      settings,
+      async (ms) => {
+        await hooks?.onBusy?.();
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      },
+      async ({ model, status, ms }) => {
+        // Timing only, to tell a busy provider from a slow answer. Never the key or the question.
+        console.info(`[Sima] ${model}: ${status ?? 'no reply'} in ${(ms / 1000).toFixed(1)}s`);
+        if (status === 429 || status === 503) await hooks?.onBusy?.();
+      },
+    );
     return keepWorkerAlive(() =>
       provider.completeStructured({
         ...prompt,

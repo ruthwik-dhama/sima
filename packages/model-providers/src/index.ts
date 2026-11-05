@@ -14,6 +14,15 @@ export interface ProviderConfig {
   fetch?: typeof fetch;
   /** How to wait between retries. Replaced in tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** Told how each Gemini model attempt went. Never receives the key or the question text. */
+  onAttempt?: (attempt: ModelAttempt) => void | Promise<void>;
+}
+
+export interface ModelAttempt {
+  model: string;
+  /** HTTP status, or undefined if there was no usable reply. */
+  status: number | undefined;
+  ms: number;
 }
 
 export interface ModelProvider {
@@ -40,6 +49,8 @@ const LOCAL_REQUEST_TIMEOUT_MS = 300_000;
 const BUSY_STATUSES = [429, 503];
 const RETRY_DELAYS_MS = [1500, 4000];
 const MAX_RETRY_AFTER_MS = 15_000;
+/** The one pause on Gemini, once every model has said it's overloaded. */
+const GEMINI_RETRY_PAUSE_MS = 3000;
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function isBusy(error: unknown): boolean {
@@ -61,6 +72,8 @@ interface HttpOptions {
   fetchImpl: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
+  /** Fail on the first busy reply, for callers with somewhere else to go. */
+  once?: boolean;
 }
 
 function redact(text: string, secret: string): string {
@@ -68,6 +81,7 @@ function redact(text: string, secret: string): string {
 }
 
 async function http(options: HttpOptions): Promise<Record<string, unknown>> {
+  if (options.once) return httpOnce(options);
   const sleep = options.sleep ?? realSleep;
   for (const delay of RETRY_DELAYS_MS) {
     try {
@@ -241,6 +255,22 @@ export function createGeminiProvider(config: ProviderConfig): ModelProvider {
   const base = config.baseUrl ?? 'https://generativelanguage.googleapis.com';
   // The key goes in a header, not the URL, so it cannot appear in logs of request URLs.
   const headers = { 'x-goog-api-key': config.apiKey };
+  const listGeminiModels = async (once: boolean) => {
+    const data = await http({
+      url: `${base}/v1beta/models?pageSize=200`,
+      method: 'GET',
+      headers,
+      secret: config.apiKey,
+      fetchImpl,
+      sleep: config.sleep,
+      once,
+    });
+    return asArray(data.models)
+      .filter((m) =>
+        (m.supportedGenerationMethods as string[] | undefined)?.includes('generateContent'),
+      )
+      .map((m) => String(m.name).replace(/^models\//, ''));
+  };
   return {
     id: 'gemini',
     async completeStructured(req) {
@@ -250,7 +280,7 @@ export function createGeminiProvider(config: ProviderConfig): ModelProvider {
           headers,
           secret: config.apiKey,
           fetchImpl,
-          sleep: config.sleep,
+          once: true,
           body: {
             systemInstruction: { parts: [{ text: req.system }] },
             contents: [{ role: 'user', parts: [{ text: req.user }] }],
@@ -263,36 +293,53 @@ export function createGeminiProvider(config: ProviderConfig): ModelProvider {
         const content = asArray(data.candidates)[0]?.content as Json | undefined;
         return parseJsonText(asArray(content?.parts)[0]?.text);
       };
-      try {
-        return await generate(req.model);
-      } catch (error) {
-        if (!isBusy(error)) throw error;
-        // Demand spikes hit one model at a time, so another free model often still answers.
-        for (const model of geminiFallbacks(await this.listModels().catch(() => []), req.model)) {
-          try {
-            return await generate(model);
-          } catch (next) {
-            if (!isBusy(next)) throw next;
-          }
+      const attempt = async (model: string) => {
+        const started = Date.now();
+        const report = (status: number | undefined) =>
+          config.onAttempt?.({ model, status, ms: Date.now() - started });
+        try {
+          const result = await generate(model);
+          await report(200);
+          return result;
+        } catch (error) {
+          await report(error instanceof ProviderError ? error.status : undefined);
+          throw error;
         }
-        throw error;
+      };
+
+      // Busy replies hit one model at a time, so another free model is quicker than waiting.
+      let firstError: unknown;
+      const overloaded: string[] = [];
+      const tryModel = async (model: string): Promise<{ result: unknown } | null> => {
+        try {
+          return { result: await attempt(model) };
+        } catch (error) {
+          if (!isBusy(error)) throw error;
+          firstError ??= error;
+          if ((error as ProviderError).status === 503) overloaded.push(model);
+          return null;
+        }
+      };
+
+      const first = await tryModel(req.model);
+      if (first) return first.result;
+      const others = await listGeminiModels(true).catch(() => []);
+      for (const model of geminiFallbacks(others, req.model)) {
+        const answer = await tryModel(model);
+        if (answer) return answer.result;
       }
+      // A rate limit won't clear in seconds, but an overload might, so that gets one more try.
+      const again = [...overloaded];
+      if (again.length > 0) {
+        await (config.sleep ?? realSleep)(GEMINI_RETRY_PAUSE_MS);
+        for (const model of again) {
+          const answer = await tryModel(model);
+          if (answer) return answer.result;
+        }
+      }
+      throw firstError;
     },
-    async listModels() {
-      const data = await http({
-        url: `${base}/v1beta/models?pageSize=200`,
-        method: 'GET',
-        headers,
-        secret: config.apiKey,
-        fetchImpl,
-        sleep: config.sleep,
-      });
-      return asArray(data.models)
-        .filter((m) =>
-          (m.supportedGenerationMethods as string[] | undefined)?.includes('generateContent'),
-        )
-        .map((m) => String(m.name).replace(/^models\//, ''));
-    },
+    listModels: () => listGeminiModels(false),
   };
 }
 
