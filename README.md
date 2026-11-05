@@ -1,4 +1,27 @@
-# Sima
+<p align="center">
+  <img src="docs/logo.png" alt="Sima logo" width="128" height="128">
+</p>
+
+<h1 align="center">Sima</h1>
+
+<h3 align="center">Your AI learning assistant in Chrome</h3>
+
+<p align="center">
+  <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-black?style=flat-square"></a>
+  <img alt="Chrome MV3" src="https://img.shields.io/badge/Chrome-MV3-black?style=flat-square">
+  <img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-black?style=flat-square">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-black?style=flat-square">
+  <img alt="WXT 0.21" src="https://img.shields.io/badge/WXT-0.21-black?style=flat-square">
+  <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind_CSS-4-black?style=flat-square">
+  <img alt="shadcn/ui Radix" src="https://img.shields.io/badge/shadcn%2Fui-Radix-black?style=flat-square">
+  <img alt="Zustand 5" src="https://img.shields.io/badge/Zustand-5-black?style=flat-square">
+  <img alt="Zod 4" src="https://img.shields.io/badge/Zod-4-black?style=flat-square">
+  <img alt="Dexie 4" src="https://img.shields.io/badge/Dexie-4-black?style=flat-square">
+  <img alt="Vitest 5" src="https://img.shields.io/badge/Vitest-5-black?style=flat-square">
+  <img alt="Playwright 1.64" src="https://img.shields.io/badge/Playwright-1.64-black?style=flat-square">
+  <img alt="pnpm 12" src="https://img.shields.io/badge/pnpm-12-black?style=flat-square">
+  <img alt="Node 22+" src="https://img.shields.io/badge/Node-22%2B-black?style=flat-square">
+</p>
 
 Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with the AI provider you choose, and explains its reasoning. If your course allows it, Sima can also enter the answers for you to check before you submit.
 
