@@ -21,9 +21,11 @@ export function FloatingAssistant({ initial, subscribe, onOpen, onDismiss }: Pro
 
   const detail = state.restricted
     ? 'Not available'
-    : state.total > 0
-      ? `${state.done} of ${state.total}`
-      : null;
+    : state.note
+      ? state.note
+      : state.total > 0
+        ? `${state.done} of ${state.total}`
+        : null;
 
   return (
     <div

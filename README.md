@@ -45,13 +45,13 @@ You need Chrome 127 or newer. Sima isn't on the Chrome Web Store, so you install
 4. Click **Load unpacked** and choose the unzipped folder.
 5. Click the puzzle-piece icon in the toolbar, then pin Sima.
 
-**Set up an AI provider:** click the Sima icon, click the gear, choose a provider, and click **Save and test connection**. You can use a local model with Ollama, which keeps question text on your computer, or your own OpenAI, Anthropic or Gemini API key. See [docs/PROVIDERS.md](docs/PROVIDERS.md).
+**Set up an AI provider:** click the Sima icon and enter your birth date. If you're 18 or older, Sima uses Google Gemini's free tier: click **Set up Gemini** and follow the short steps to copy a free key from Google and paste it in. If you're under 18, Sima uses a local model through Ollama, which keeps question text on your computer. Gemini's free tier isn't available in the EEA, Switzerland or the UK, so choose Ollama there. See the [privacy terms](docs/PRIVACY.md) and [provider guide](docs/PROVIDERS.md).
 
 **Use it:** open an activity on a supported site, click the Sima icon, and click **Fill answers** or **Explain only**.
 
 **Update it:** download the new `.zip`, replace the contents of the same folder, and click the reload arrow on the Sima card at `chrome://extensions`. Updates aren't automatic, so watch the repository's releases to hear about new versions.
 
-If you see "No questions recognized", Sima doesn't understand that page's layout yet: see [Known limitations](#known-limitations). The downloaded version can't open the mock activities, so to try those, build from source and follow [Try it on the mock platforms](#try-it-on-the-mock-platforms).
+If you see "Sima can't read this page yet", Sima doesn't understand that page's layout. You can help add support: see [Testing on real sites](docs/TESTING-LIVE-SITES.md). The downloaded version can't open the mock activities, so to try those, build from source and follow [Try it on the mock platforms](#try-it-on-the-mock-platforms).
 
 ## Build from source
 
@@ -106,7 +106,7 @@ End-to-end tests need Chromium once: `pnpm exec playwright install chromium`. Th
 
 ## Known limitations
 
-- **Live sites are untested.** Adapters recognize each platform's hostname, but their selectors match the local mocks. On a real page, expect "No questions recognized" until an adapter is verified there.
+- **Live sites don't work yet.** Sima recognizes each platform's hostname, but its adapters only understand the local mock pages, so real pages show "Sima can't read this page yet". See [Testing on real sites](docs/TESTING-LIVE-SITES.md).
 - **Restriction detection is a heuristic.** It reads titles and visible text, so it can miss a restriction stated elsewhere, such as in a syllabus, or block a legitimate activity. A miss doesn't change your obligation to follow course rules.
 - **Images aren't sent to models.** Only their descriptions are, and confidence is capped when a description is missing.
 - **Only top-level documents are read.** Questions inside iframes aren't detected, and rich-text editors built on iframes can't be filled.
@@ -116,8 +116,10 @@ End-to-end tests need Chromium once: `pnpm exec playwright install chromium`. Th
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Security and privacy](docs/SECURITY.md)
+- [Privacy terms](docs/PRIVACY.md)
+- [Security](docs/SECURITY.md)
 - [AI providers](docs/PROVIDERS.md)
+- [Testing on real sites](docs/TESTING-LIVE-SITES.md)
 - [Contributing](CONTRIBUTING.md)
 
 MIT licensed. Not affiliated with Gradescope, Vista Higher Learning, WebAssign or Cengage.

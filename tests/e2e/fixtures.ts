@@ -19,6 +19,7 @@ const EXTENSION = resolve('apps/extension/.output-e2e/chrome-mv3');
 export interface FakeModel {
   requests: string[];
   overrides: Array<(prompt: string) => unknown | undefined>;
+  delayMs?: number;
 }
 
 function keysIn(prompt: string): string[] {
@@ -46,6 +47,14 @@ function answer(prompt: string): unknown {
     m2: ['book'],
     art: ['la'],
     esc: ['Mi familia es pequeña. Tengo una hermana.'],
+    question_101_wol_0: ['estudiamos'],
+    question_102_wol_0: ['fueron'],
+    question_103_wol_0: ['leí'],
+    question_103_wol_1: ['vio'],
+    question_201_0: ['es'],
+    question_202_0: ['son'],
+    question_203_0: ['hace'],
+    question_203_1: ['hace'],
     speed: ['12.5'],
     speed_unit: ['m/s'],
     accel: ['0'],
@@ -65,6 +74,31 @@ function answer(prompt: string): unknown {
   };
 }
 
+type Answers = Array<{ fieldKey: string; values: string[] }> | Record<string, string[]>;
+type Reply = Record<string, unknown> & { answers?: Answers; omit?: string[] };
+
+/**
+ * A page arrives as one request, so overrides change only the fields they name. A reply with no
+ * answers replaces everything, which is how a test sends unusable output.
+ */
+function withOverrides(prompt: string, overrides: Reply[]): unknown {
+  const base = answer(prompt) as Reply & { answers: Array<{ fieldKey: string; values: string[] }> };
+  let merged = base;
+  for (const override of overrides) {
+    if (!('answers' in override)) return override;
+    const named = Array.isArray(override.answers)
+      ? override.answers
+      : Object.entries(override.answers ?? {}).map(([fieldKey, values]) => ({ fieldKey, values }));
+    const replaced = new Set([...named.map((a) => a.fieldKey), ...(override.omit ?? [])]);
+    merged = {
+      ...merged,
+      ...override,
+      answers: [...merged.answers.filter((a) => !replaced.has(a.fieldKey)), ...named],
+    };
+  }
+  return merged;
+}
+
 function startFakeModel(model: FakeModel): Promise<Server> {
   const server = createServer((req, res) => {
     let body = '';
@@ -77,12 +111,13 @@ function startFakeModel(model: FakeModel): Promise<Server> {
       const prompt = parsed.messages.find((m) => m.role === 'user')?.content ?? '';
       model.requests.push(prompt);
       const followUp = prompt.includes("Student's follow-up");
-      const override = model.overrides.map((fn) => fn(prompt)).find((v) => v !== undefined);
-      const content =
-        override ?? (followUp ? { answer: 'Think of it as a rate of change.' } : answer(prompt));
+      const overrides = model.overrides.map((fn) => fn(prompt)).filter((v) => v !== undefined);
+      const content = followUp
+        ? { answer: 'Think of it as a rate of change.' }
+        : withOverrides(prompt, overrides as Reply[]);
       setTimeout(
         () => res.end(JSON.stringify({ message: { content: JSON.stringify(content) } })),
-        30,
+        model.delayMs ?? 30,
       );
     });
   });
@@ -129,6 +164,8 @@ export const test = base.extend<Fixtures>({
     void model;
     const settings = await context.newPage();
     await settings.goto(`chrome-extension://${extensionId}/options.html`);
+    await setBirthDate(settings, MINOR_BIRTH_DATE);
+    await settings.reload();
     await settings.getByTestId('ollama-url').fill(`http://127.0.0.1:${OLLAMA_PORT}`);
     await settings.getByTestId('model').fill('fake-model');
     await settings.close();
@@ -173,4 +210,15 @@ export async function openRow(panel: Page, questionId: string) {
   const row = panel.getByTestId(`question-${questionId}`);
   if ((await row.getAttribute('open')) === null)
     await panel.getByTestId(`row-${questionId}`).click();
+}
+
+/** Dates relative to any test run: a child, and someone well past 18. */
+export const MINOR_BIRTH_DATE = `${new Date().getFullYear() - 10}-01-15`;
+export const ADULT_BIRTH_DATE = `${new Date().getFullYear() - 30}-01-15`;
+
+export function setBirthDate(page: Page, birthDate: string) {
+  return page.evaluate(
+    (date) => chrome.runtime.sendMessage({ type: 'SET_BIRTH_DATE', birthDate: date }),
+    birthDate,
+  );
 }

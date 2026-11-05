@@ -2,7 +2,9 @@ import { createTaskStore } from '@sima/storage';
 import { TaskEngine, type PagePort } from '@sima/task-orchestrator';
 import {
   ActionResultSchema,
+  CaptureResultSchema,
   ContentEventSchema,
+  isAdultOn,
   PageAnalysisSchema,
   UiCommandSchema,
   type ContentCommand,
@@ -12,6 +14,7 @@ import {
 } from '@sima/shared-types';
 import { buildProvider, reasoner } from '@/services/reasoner';
 import {
+  assertProviderAllowed,
   configuredProviders,
   deleteApiKeys,
   loadSettings,
@@ -81,6 +84,7 @@ export default defineBackground(() => {
       done: view.progress.answered,
       total: view.progress.total,
       restricted: task?.status === 'blocked_restricted',
+      note: task?.activityNote ?? null,
     };
   }
 
@@ -148,14 +152,45 @@ export default defineBackground(() => {
         return engine.restart(command.taskId);
       case 'FOLLOW_UP':
         return engine.followUp(command.recordId, command.question);
+      case 'CAPTURE_PAGE': {
+        const raw = await chrome.tabs
+          .sendMessage(command.tabId, { type: 'CAPTURE_PAGE' } satisfies ContentCommand)
+          .catch(() => {
+            throw new Error(
+              'Sima can only capture supported sites. Reload the page and try again.',
+            );
+          });
+        return CaptureResultSchema.parse(raw);
+      }
       case 'GET_SETTINGS':
         return { settings: await loadSettings(), configured: await configuredProviders() };
-      case 'SAVE_SETTINGS':
-        return saveSettings(command.settings);
+      case 'SAVE_SETTINGS': {
+        // The age result only ever changes through SET_BIRTH_DATE.
+        const { ageCheck } = await loadSettings();
+        const next = { ...command.settings, ageCheck };
+        if (ageCheck !== 'unset') assertProviderAllowed(next, next.activeProvider);
+        return saveSettings(next);
+      }
+      case 'SET_BIRTH_DATE': {
+        const settings = await loadSettings();
+        if (settings.ageCheck !== 'unset') throw new Error('Your birth date is already set.');
+        const adult = isAdultOn(command.birthDate, new Date());
+        if (adult === null) throw new Error('Enter a real birth date.');
+        // Someone already set up on a local model stays on it, and can switch in Settings.
+        const keepLocal =
+          adult && settings.models.ollama !== '' && settings.activeProvider === 'ollama';
+        return saveSettings({
+          ...settings,
+          ageCheck: adult ? 'adult' : 'minor',
+          activeProvider: adult && !keepLocal ? 'gemini' : 'ollama',
+        });
+      }
       case 'SET_API_KEY':
+        assertProviderAllowed(await loadSettings(), command.provider);
         return saveApiKey(command.provider, command.apiKey);
       case 'ACKNOWLEDGE_PROVIDER': {
         const settings = await loadSettings();
+        assertProviderAllowed(settings, command.provider);
         return saveSettings({
           ...settings,
           acknowledgedProviders: [
@@ -165,6 +200,7 @@ export default defineBackground(() => {
       }
       case 'TEST_PROVIDER': {
         const settings = await loadSettings();
+        assertProviderAllowed(settings, command.provider);
         const provider = await buildProvider(command.provider, settings);
         return provider.listModels();
       }

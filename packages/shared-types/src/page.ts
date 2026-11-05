@@ -30,6 +30,19 @@ export const FieldOptionSchema = z.object({
 });
 export type FieldOption = z.infer<typeof FieldOptionSchema>;
 
+/**
+ * A dropdown drawn by the site over a hidden <select>. Choosing means clicking through the visible
+ * list, as a person would, because setting the hidden value doesn't update what the page shows.
+ */
+export const CustomSelectSchema = z.object({
+  button: ElementTargetSchema,
+  /** Finds the list's options once it's open. Each option carries indexAttribute. */
+  optionSelector: z.string().min(1).max(200),
+  /** Attribute holding the option's position in the <select>. */
+  indexAttribute: z.string().min(1).max(60),
+});
+export type CustomSelect = z.infer<typeof CustomSelectSchema>;
+
 export const AnswerFieldSchema = z.object({
   key: z.string().min(1),
   kind: FieldKindSchema,
@@ -37,6 +50,7 @@ export const AnswerFieldSchema = z.object({
   /** The input itself. For radio/checkbox groups, the first option's input. */
   target: ElementTargetSchema,
   options: z.array(FieldOptionSchema),
+  customSelect: CustomSelectSchema.optional(),
   /** Text value, or the ids of the selected options. */
   currentValues: z.array(z.string()),
   mappingConfidence: z.number().min(0).max(1),

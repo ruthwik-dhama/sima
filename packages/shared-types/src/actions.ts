@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ElementTargetSchema } from './page';
+import { CustomSelectSchema, ElementTargetSchema } from './page';
 
 const Base = z.object({
   /** Deterministic idempotency key: same task, field and value yield the same id. */
@@ -15,7 +15,11 @@ const Base = z.object({
  */
 export const BrowserActionSchema = z.discriminatedUnion('type', [
   Base.extend({ type: z.literal('fill_text'), value: z.string().max(20000) }),
-  Base.extend({ type: z.literal('select_option'), optionValue: z.string() }),
+  Base.extend({
+    type: z.literal('select_option'),
+    optionValue: z.string(),
+    customSelect: CustomSelectSchema.optional(),
+  }),
   Base.extend({ type: z.literal('select_radio'), optionId: z.string() }),
   Base.extend({ type: z.literal('set_checkbox'), optionId: z.string(), checked: z.boolean() }),
   Base.extend({

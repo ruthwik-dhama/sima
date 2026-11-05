@@ -1,17 +1,28 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import logo from '@/assets/logo.png?inline';
 import { CircleAlert, Settings } from 'lucide-react';
+import { findAdapter } from '@sima/adapter-core';
 import { PROVIDER_ENDPOINTS } from '@sima/shared-types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { ADAPTERS } from '@/services/adapters';
 import { openSettings } from '@/services/open-settings';
 import { useTaskStore } from '@/stores/task-store';
-import { Controls, Disclosure, Restricted } from './Sections';
+import { CaptureLayout, Controls, Disclosure, Restricted } from './Sections';
 import { QuestionCard } from './QuestionCard';
 
+function isSupported(url: string): boolean {
+  try {
+    return findAdapter(ADAPTERS, new URL(url)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function App() {
-  const { view, error, setTab, refresh, dismissError } = useTaskStore();
+  const { tabId, view, error, setTab, refresh, dismissError } = useTaskStore();
+  const [onSupportedSite, setOnSupportedSite] = useState(false);
 
   useEffect(() => {
     const fromQuery = Number(new URLSearchParams(location.search).get('tabId'));
@@ -31,6 +42,15 @@ export function App() {
     chrome.runtime.onMessage.addListener(onMessage);
     return () => chrome.runtime.onMessage.removeListener(onMessage);
   }, [refresh]);
+
+  // Whether this tab is on a site Sima has an adapter for, even if it can't read this page.
+  useEffect(() => {
+    if (tabId === null) return;
+    void chrome.tabs
+      .get(tabId)
+      .then((tab) => setOnSupportedSite(tab.url ? isSupported(tab.url) : false))
+      .catch(() => setOnSupportedSite(false));
+  }, [tabId, view?.task?.id]);
 
   const task = view?.task;
   const analysis = view?.analysis;
@@ -117,8 +137,23 @@ export function App() {
 
         {!task && (
           <div className="px-6 py-8 text-center text-muted-foreground" data-testid="empty-state">
-            <p className="font-medium text-foreground">No supported activity on this tab</p>
-            <p>Open an activity on Gradescope, VHL Central or WebAssign to use Sima.</p>
+            {onSupportedSite ? (
+              <div className="flex flex-col gap-3">
+                <p className="font-medium text-foreground">Sima can't read this page yet</p>
+                {tabId !== null && <CaptureLayout tabId={tabId} />}
+              </div>
+            ) : (
+              <>
+                <p className="font-medium text-foreground">No supported activity on this tab</p>
+                <p>Open an activity on Gradescope, VHL Central or WebAssign to use Sima.</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {task && view && !restricted && view.questions.length === 0 && tabId !== null && (
+          <div className="px-6 py-6">
+            <CaptureLayout tabId={tabId} />
           </div>
         )}
 

@@ -4,6 +4,8 @@ import { analyzePage, findAdapter } from '@sima/adapter-core';
 import { gradescopeAdapter } from '@sima/adapter-gradescope';
 import { vhlAdapter } from '@sima/adapter-vhl';
 import { webassignAdapter } from '@sima/adapter-webassign';
+import { JSDOM } from 'jsdom';
+import { detectRestrictions } from '@sima/page-analyzer';
 import { checkAction, executeAction } from '@sima/browser-executor';
 import { buildNavigateAction } from '@sima/action-planner';
 import type { BrowserAction } from '@sima/shared-types';
@@ -116,6 +118,123 @@ describe('VHL mock', () => {
   it('has no next control on the last page, where only submit remains', async () => {
     const { analysis } = await analyze('/vhl/activity.html?page=3');
     expect(analysis.next).toBeNull();
+  });
+});
+
+describe('VHL live layout', () => {
+  it('reads fill-in questions, marking each blank where it sits', async () => {
+    const { analysis } = await analyze('/vhl/live-fill-in.html');
+    expect(analysis.activity.title).toBe('Lección 5: Completar');
+    expect(analysis.activity.id).toBe('/vhl/live-fill-in.html');
+    expect(analysis.instructions).toContain('Completa');
+    expect(analysis.questions.map((q) => q.fields.map((f) => f.key))).toEqual([
+      ['question_101_wol_0'],
+      ['question_102_wol_0'],
+      ['question_103_wol_0', 'question_103_wol_1'],
+    ]);
+    expect(analysis.questions[0]?.prompt).toBe(
+      'Nosotros [question_101_wol_0] en la biblioteca. (estudiar)',
+    );
+    expect(analysis.questions[2]?.prompt).toContain(
+      '[question_103_wol_0] un libro y mi amigo [question_103_wol_1]',
+    );
+    expect(
+      analysis.questions.flatMap((q) => q.fields).every((f) => f.mappingConfidence >= 0.8),
+    ).toBe(true);
+  });
+
+  it('ignores the chat box, audio-speed radios, Save and Submit', async () => {
+    const { analysis } = await analyze('/vhl/live-fill-in.html');
+    const keys = analysis.questions.flatMap((q) => q.fields.map((f) => f.key));
+    expect(keys.join()).not.toMatch(/chat|speed|commit|token/);
+    expect(analysis.next).toBeNull();
+  });
+
+  it('reads hidden dropdowns through their visible controls', async () => {
+    const { analysis } = await analyze('/vhl/live-dropdown.html');
+    const [first, , third] = analysis.questions;
+    const field = first!.fields[0]!;
+    expect(field).toMatchObject({ key: 'question_201_0', kind: 'select' });
+    expect(field.options.map((o) => o.id)).toEqual(['es', 'son', 'somos']);
+    expect(field.customSelect?.button.selector).toBe('#question_201_0_dd_btn');
+    // VHL's blank first entry has the value "0", and is neither a choice nor an answer.
+    expect(field.currentValues).toEqual([]);
+    expect(field.options.map((o) => o.id)).not.toContain('0');
+    expect(first!.prompt).toBe('Mi hermana [question_201_0] muy alta.');
+    expect(third!.fields).toHaveLength(2);
+    expect(third!.prompt).toBe('Hoy [question_203_0] frío y mañana [question_203_1] calor.');
+  });
+
+  it('sends the example and word list with the directions', async () => {
+    const { analysis } = await analyze('/vhl/live-wordbank.html');
+    expect(analysis.instructions).toContain('usando los verbos reflexivos');
+    expect(analysis.instructions).toContain(
+      'Example (Modelo): Ana y Pedro no «se saludan». (saludarse)',
+    );
+    expect(analysis.instructions).toContain('Word list: acostarse, despertarse, ducharse, irse');
+    expect(analysis.instructions).not.toContain('Reference:');
+  });
+
+  it('skips a marked results page, where nothing can be filled', async () => {
+    const { doc } = await analyze('/vhl/live-fill-in.html');
+    doc.querySelectorAll('input.c-fib-question__input').forEach((box) => box.remove());
+    const url = new URL('http://127.0.0.1:5199/vhl/live-fill-in.html');
+    expect(analyzePage(vhlAdapter, doc, url)?.questions).toEqual([]);
+  });
+
+  it('does not treat the empty timer on ordinary activities as an assessment', async () => {
+    const { analysis } = await analyze('/vhl/live-fill-in.html');
+    expect(analysis.restriction.status).toBe('none_detected');
+  });
+
+  it.each(['/vhl/live-timed.html', '/vhl/live-prueba.html'])('blocks %s', async (path) => {
+    const { analysis } = await analyze(path);
+    expect(analysis.restriction.status).toBe('restricted');
+    expect(analysis.questions).toEqual([]);
+  });
+
+  it('chooses from a custom dropdown by clicking, and refuses a missing option', async () => {
+    const { doc, analysis } = await analyze('/vhl/live-dropdown.html');
+    const field = analysis.questions[0]!.fields[0]!;
+    const action: BrowserAction = {
+      type: 'select_option',
+      id: 'a',
+      questionId: 'q',
+      fieldKey: field.key,
+      target: field.target,
+      optionValue: 'es',
+      customSelect: field.customSelect!,
+    };
+    const ctx = { doc, isRestricted: () => false };
+    expect(await executeAction(action, ctx)).toMatchObject({ status: 'verified', observed: 'es' });
+    expect(doc.querySelector('#question_201_0_dd_btn')?.textContent).toContain('es');
+    expect(await executeAction({ ...action, optionValue: 'nope' }, ctx)).toMatchObject({
+      failure: 'option_missing',
+    });
+  });
+});
+
+describe('assessment titles in other languages', () => {
+  it.each([
+    'Lección 3: Prueba',
+    'Examen final',
+    'Prüfung 2',
+    'Test de compréhension',
+    "L'évaluation",
+  ])('blocks %s', (title) => {
+    const doc = new JSDOM('<body></body>').window.document;
+    expect(detectRestrictions(doc, title).status).toBe('restricted');
+  });
+
+  it.each([
+    'Lección 3: Completar',
+    'Contesta',
+    'Latest news',
+    'Pruebas de práctica',
+    'Protest songs',
+  ])('allows %s', (title) => {
+    const doc = new JSDOM('<body></body>').window.document;
+    expect(detectRestrictions(doc, title).status).toBe('none_detected');
   });
 });
 

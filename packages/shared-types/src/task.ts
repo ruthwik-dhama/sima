@@ -33,6 +33,8 @@ export const TaskSchema = z.object({
   currentPageKey: z.string(),
   pages: z.array(z.object({ pageKey: z.string(), index: z.number(), total: z.number() })),
   error: z.string().nullable(),
+  /** What the current step is doing, shown while it runs. */
+  activityNote: z.string().nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

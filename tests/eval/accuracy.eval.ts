@@ -9,8 +9,8 @@ import { vhlAdapter } from '@sima/adapter-vhl';
 import { webassignAdapter } from '@sima/adapter-webassign';
 import { createOllamaProvider } from '@sima/model-providers';
 import { autoFillHold } from '@sima/action-planner';
-import { solveQuestion } from '@sima/reasoning-engine';
-import type { Question, QuestionRecord } from '@sima/shared-types';
+import { chunkForSolving, solveBatch } from '@sima/reasoning-engine';
+import type { Question, QuestionRecord, ValidatedSolution } from '@sima/shared-types';
 import { startPlayground } from '../../playground/server.mjs';
 import { loadMock } from '../helpers';
 
@@ -23,9 +23,36 @@ const PAGES = [
   '/webassign/assignment.html?q=1',
   '/webassign/assignment.html?q=2',
   '/webassign/assignment.html?q=3',
+  '/vhl/live-matching.html',
+  '/vhl/live-subjunctive.html',
+  '/vhl/live-wordbank.html',
 ];
 /** Accepted answers per field. Written responses are skipped, as they have no single answer. */
 const KEY: Record<string, (values: string[]) => boolean> = {
+  question_501_0: (v) => v[0]?.trim().toLowerCase() === 'busco el libro',
+  question_502_0: (v) => v[0]?.trim().toLowerCase() === '¿viste la película',
+  question_503_0: (v) => v[0]?.trim().toLowerCase() === 'necesito el número del dentista',
+  question_504_0: (v) => v[0]?.trim().toLowerCase() === '¿dónde compraste los zapatos',
+  question_505_0: (v) => v[0]?.trim().toLowerCase() === '¿quién se comió la pizza',
+  question_506_0: (v) => v[0]?.trim().toLowerCase() === 'prefiero un jefe',
+  question_507_0: (v) => v[0]?.trim().toLowerCase() === 'no conozco a nadie',
+  question_508_0: (v) => v[0]?.trim().toLowerCase() === 'quiero una bicicleta',
+  question_509_0: (v) => v[0]?.trim().toLowerCase() === '¿me recomiendas un restaurante',
+  question_601_wol_0: (v) => v[0]?.trim().toLowerCase() === 'pague',
+  question_602_wol_0: (v) => v[0]?.trim().toLowerCase() === 'entiendan',
+  question_603_wol_0: (v) => v[0]?.trim().toLowerCase() === 'enseñe',
+  question_604_wol_0: (v) => v[0]?.trim().toLowerCase() === 'sepa',
+  question_605_wol_0: (v) => v[0]?.trim().toLowerCase() === 'protejan',
+  question_606_wol_0: (v) => v[0]?.trim().toLowerCase() === 'esté',
+  question_607_wol_0: (v) => v[0]?.trim().toLowerCase() === 'tenga',
+  question_608_wol_0: (v) => v[0]?.trim().toLowerCase() === 'sea',
+  question_701_wol_0: (v) => v[0]?.trim().toLowerCase() === 'me despierto',
+  question_702_wol_0: (v) => v[0]?.trim().toLowerCase() === 'se acuestan',
+  question_703_wol_0: (v) => v[0]?.trim().toLowerCase() === 'te duchas',
+  question_704_wol_0: (v) => v[0]?.trim().toLowerCase() === 'nos lavamos',
+  question_705_wol_0: (v) => v[0]?.trim().toLowerCase() === 'se queja',
+  question_706_wol_0: (v) => v[0]?.trim().toLowerCase() === 'se visten',
+  question_707_wol_0: (v) => v[0]?.trim().toLowerCase() === 'me voy',
   q1: (v) => v.join() === 'b',
   q2: (v) => [...v].sort().join() === 'eleven,two',
   q3: (v) => Number(v[0]) === 93,
@@ -57,15 +84,13 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 it(`accuracy of ${MODEL}`, { timeout: 1_800_000 }, async () => {
   const adapters = [gradescopeAdapter, vhlAdapter, webassignAdapter];
   const provider = createOllamaProvider({ apiKey: '' });
-  const questions: Array<{ question: Question; instructions: string }> = [];
-  for (const path of PAGES) {
+  const pages: Array<{ list: Question[]; instructions: string }> = [];
+  for (const path of PAGES.filter((page) => page.includes(process.env.SIMA_EVAL_ONLY ?? ''))) {
     const url = new URL(`http://127.0.0.1:5199${path}`);
     const adapter = findAdapter(adapters, url)!;
     const dom = await loadMock(url.href, adapter);
     const analysis = analyzePage(adapter, dom.window.document, url)!;
-    for (const question of analysis.questions) {
-      questions.push({ question, instructions: analysis.instructions });
-    }
+    pages.push({ list: analysis.questions, instructions: analysis.instructions });
   }
 
   const tally = new Map<string, { right: number; total: number; wrong: string[] }>();
@@ -79,51 +104,76 @@ it(`accuracy of ${MODEL}`, { timeout: 1_800_000 }, async () => {
   let autoRight = 0;
   const started = Date.now();
   for (let run = 0; run < RUNS; run++) {
-    for (const { question, instructions } of questions) {
-      let answers: Record<string, string[]> = {};
-      let held = true;
-      let confidence = 0;
+    const units = pages.flatMap(({ list, instructions }) =>
+      chunkForSolving(list).map((group) => ({ group, instructions })),
+    );
+    for (const { group, instructions } of units) {
+      let solutions = new Map<string, ValidatedSolution>();
       try {
-        const solution = await solveQuestion(question, instructions, (prompt, schema, schemaName) =>
+        solutions = await solveBatch(group, instructions, (prompt, schema, schemaName) =>
           provider.completeStructured({ ...prompt, schema, schemaName, model: MODEL }),
         );
-        confidence = solution.adjustedConfidence;
-        held =
+        solved++;
+      } catch {
+        unusable++;
+      }
+      for (const question of group) {
+        const solution = solutions.get(question.id);
+        const confidence = solution?.adjustedConfidence ?? 0;
+        const held =
+          !solution ||
           autoFillHold({
             question,
             solution,
             solveError: null,
             responses: {},
           } as unknown as QuestionRecord) !== null;
-        answers = Object.fromEntries(solution.answers.map((a) => [a.fieldKey, a.values]));
-        solved++;
-      } catch {
-        unusable++;
-      }
-      for (const field of question.fields) {
-        const check = KEY[field.key];
-        if (!check) continue;
-        const entry = tally.get(field.key) ?? { right: 0, total: 0, wrong: [] };
-        const values = answers[field.key] ?? [];
-        entry.total++;
-        if (check(values)) {
-          entry.right++;
-          rightConfidence.push(confidence);
-        } else {
-          entry.wrong.push(JSON.stringify(values));
-          wrongConfidence.push(confidence);
+        const answers: Record<string, string[]> = Object.fromEntries(
+          (solution?.answers ?? []).map((a) => [a.fieldKey, a.values]),
+        );
+        for (const field of question.fields) {
+          const check = KEY[field.key];
+          if (!check) continue;
+          const entry = tally.get(field.key) ?? { right: 0, total: 0, wrong: [] };
+          const values = answers[field.key] ?? [];
+          entry.total++;
+          if (check(values)) {
+            entry.right++;
+            rightConfidence.push(confidence);
+          } else {
+            entry.wrong.push(JSON.stringify(values));
+            wrongConfidence.push(confidence);
+          }
+          if (!held) {
+            autoEntered++;
+            if (check(values)) autoRight++;
+          }
+          tally.set(field.key, entry);
         }
-        if (!held) {
-          autoEntered++;
-          if (check(values)) autoRight++;
-        }
-        tally.set(field.key, entry);
       }
     }
   }
 
   let right = 0;
   let total = 0;
+  const sets: Record<string, [number, number]> = {
+    'matching (VHL style)': [0, 0],
+    'subjunctive (VHL style)': [0, 0],
+    'word list (VHL style)': [0, 0],
+    'original mock questions': [0, 0],
+  };
+  for (const [key, entry] of tally) {
+    const name = /_50\d_/.test(key)
+      ? 'matching (VHL style)'
+      : /_60\d_/.test(key)
+        ? 'subjunctive (VHL style)'
+        : /_70\d_/.test(key)
+          ? 'word list (VHL style)'
+          : 'original mock questions';
+    sets[name]![0] += entry.right;
+    sets[name]![1] += entry.total;
+  }
+  for (const [name, [r, t]] of Object.entries(sets)) say(`SET ${name}: ${r}/${t}`);
   for (const [key, entry] of tally) {
     right += entry.right;
     total += entry.total;

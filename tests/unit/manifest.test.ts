@@ -18,6 +18,7 @@ describe.runIf(existsSync(path))('production manifest', () => {
   it('keeps provider and local-model access optional', () => {
     expect(manifest.optional_host_permissions).toContain('https://api.openai.com/*');
     expect(manifest.host_permissions).not.toContain('https://api.openai.com/*');
+    expect(manifest.host_permissions).toContain('https://generativelanguage.googleapis.com/*');
     expect(manifest.permissions.sort()).toEqual(['storage']);
   });
 

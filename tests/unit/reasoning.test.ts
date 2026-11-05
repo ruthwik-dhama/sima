@@ -5,6 +5,10 @@ import {
   evaluateExpression,
   numbersAgree,
   buildSolutionSchema,
+  buildBatchSchema,
+  chunkForSolving,
+  groupForSolving,
+  solveBatch,
   SOLUTION_JSON_SCHEMA,
   solveQuestion,
   validateSolution,
@@ -330,6 +334,189 @@ describe('final answers', () => {
       solution({ answers: [{ fieldKey: 'a', values: [value] }], explanation: 'other text' }),
     );
     expect(result.answers[0]?.values).toEqual([value]);
+  });
+});
+
+describe('answers that fit the blank', () => {
+  const blank = (prompt: string, value: string, instructions = '') =>
+    validateSolution(
+      question({ prompt, fields: [textField] }),
+      solution({ answers: [{ fieldKey: 'a', values: [value] }] }),
+      { instructions },
+    );
+
+  it.each([
+    ['Necesito un viaje que me [a] (llevar) lejos.', 'me lleve', 'lleve'],
+    ['Necesito un coche que no [a] (ser) caro.', 'no sea', 'sea'],
+    ['Ella [a] casa ahora.', 'se va a casa', 'se va a'],
+    ['Yo [a] a casa.', 'me voy', 'me voy'],
+    ['Yo me [a] temprano.', 'me', 'me'],
+  ])('in "%s", %s becomes %s', (prompt, value, expected) => {
+    expect(blank(prompt, value).answers[0]?.values).toEqual([expected]);
+  });
+
+  it('flags a verb copied from the parentheses', () => {
+    const result = blank('Quiero que me [a] (llevar) lejos.', 'llevar');
+    expect(result.checks.some((c) => c.status === 'fail' && c.detail.includes('copied'))).toBe(
+      true,
+    );
+  });
+
+  it('flags a word copied unchanged from the word list', () => {
+    const list = 'Directions\nWord list: atreverse, llevarse';
+    expect(
+      blank('Mis padres [a] bien.', 'llevarse', list).checks.some((c) => c.status === 'fail'),
+    ).toBe(true);
+    expect(
+      blank('Mis padres [a] bien.', 'se llevan', list).checks.every((c) => c.status !== 'fail'),
+    ).toBe(true);
+  });
+
+  it('tells the model to use the example, conjugate and read the sentence back', () => {
+    const { system } = buildSolvePrompt(question(), '');
+    expect(system).toContain('Modelo');
+    expect(system).toContain('unchanged dictionary form');
+    expect(system).toContain('never repeat a word');
+  });
+});
+
+describe('matching sets', () => {
+  const choices = ['one', 'two', 'three', 'four', 'five'].map((id) => ({
+    id,
+    label: id.toUpperCase(),
+    target,
+  }));
+  const item = (n: number, options = choices): Question =>
+    question({
+      id: `q${n}`,
+      number: String(n),
+      prompt: `[f${n}] ending ${n}.`,
+      format: 'dropdown',
+      fields: [{ ...textField, key: `f${n}`, kind: 'select', options }],
+    });
+
+  it('groups neighbors offering the same choices, and nothing else', () => {
+    const other = [choices[0]!, choices[1]!];
+    const groups = groupForSolving([
+      item(1),
+      item(2),
+      question({ id: 'x' }),
+      item(3),
+      item(4, other),
+    ]);
+    expect(groups.map((g) => g.map((q) => q.id))).toEqual([['q1', 'q2'], ['x'], ['q3'], ['q4']]);
+  });
+
+  it('asks once for the whole set, with the choices listed once', async () => {
+    const fn = vi.fn().mockResolvedValue({
+      ...solution({ steps: ['Question 1: one fits', 'Question 2: two fits'] }),
+      answers: { f1: ['a'], f2: ['b'] },
+      perQuestion: [
+        { question: '1', explanation: 'First reason', confidence: 0.9 },
+        { question: 2, explanation: 'Second reason', confidence: 0.4 },
+      ],
+    });
+    const result = await solveBatch([item(1), item(2)], 'Directions', fn);
+    expect(fn).toHaveBeenCalledOnce();
+    const prompt = fn.mock.calls[0]?.[0];
+    expect(prompt.user).toContain('Question 1:\n[f1] ending 1.');
+    expect(prompt.user).toContain('Question 2:\n[f2] ending 2.');
+    expect(prompt.user.match(/a: ONE/g)).toHaveLength(1);
+    expect(prompt.user).toContain('Choices for questions 1 to 2:');
+    expect(prompt.system).toContain('decided as a set');
+    expect(result.get('q1')?.answers).toEqual([{ fieldKey: 'f1', values: ['one'] }]);
+    expect(result.get('q2')?.answers).toEqual([{ fieldKey: 'f2', values: ['two'] }]);
+    expect(result.get('q1')?.steps).toEqual(['Question 1: one fits']);
+    expect(result.get('q1')?.explanation).toBe('First reason');
+    expect(result.get('q2')?.explanation).toBe('Second reason');
+    expect(result.get('q2')?.adjustedConfidence).toBe(0.4);
+  });
+
+  it('retries the whole set when a choice is used twice', async () => {
+    const fn = vi
+      .fn()
+      .mockResolvedValueOnce({ ...solution(), answers: { f1: ['a'], f2: ['a'] } })
+      .mockResolvedValueOnce({ ...solution(), answers: { f1: ['a'], f2: ['b'] } });
+    const result = await solveBatch([item(1), item(2)], '', fn);
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(fn.mock.calls[1]?.[0].user).toContain('used for both');
+    expect(result.get('q2')?.answers[0]?.values).toEqual(['two']);
+    expect(result.get('q2')?.checks.every((c) => c.status !== 'fail')).toBe(true);
+  });
+
+  it('lets a short list like ser/estar repeat', async () => {
+    const short = [choices[0]!, choices[1]!];
+    const fn = vi.fn().mockResolvedValue({ ...solution(), answers: { f1: ['a'], f2: ['a'] } });
+    await solveBatch([item(1, short), item(2, short)], '', fn);
+    expect(fn).toHaveBeenCalledOnce();
+  });
+});
+
+describe('solving a page in one request', () => {
+  const text = (n: number, prompt = `Question text ${n}.`): Question =>
+    question({ id: `t${n}`, number: String(n), prompt, fields: [{ ...textField, key: `k${n}` }] });
+  const reply = (answers: Record<string, string[]>) => ({ ...solution(), answers });
+
+  it('checks each answer against its own question', async () => {
+    const fn = vi.fn().mockResolvedValue({
+      ...reply({ k1: ['3^4 = 81, 81 + 12 = 93'], k2: ['it falls = 9'] }),
+    });
+    const result = await solveBatch(
+      [text(1, 'Calculate 3^4 + 12.'), text(2, 'Explain why it falls.')],
+      '',
+      fn,
+    );
+    expect(result.get('t1')?.answers[0]?.values).toEqual(['93']);
+    expect(result.get('t2')?.answers[0]?.values).toEqual(['it falls = 9']);
+    const { system } = fn.mock.calls[0]?.[0];
+    expect(system).toContain('Questions 2 ask for an explanation');
+    expect(system).toContain('only the final answer');
+  });
+
+  it('only asks again about the question that failed', async () => {
+    const fn = vi
+      .fn()
+      .mockResolvedValueOnce(reply({ k1: ['fine'] }))
+      .mockResolvedValueOnce(reply({ k2: ['now answered'] }));
+    const result = await solveBatch([text(1), text(2)], '', fn);
+    expect(fn).toHaveBeenCalledTimes(2);
+    const retry = fn.mock.calls[1]?.[0].user;
+    expect(retry).toContain('Question text 2.');
+    expect(retry).not.toContain('Question text 1.');
+    expect(result.get('t1')?.answers[0]?.values).toEqual(['fine']);
+    expect(result.get('t2')?.answers[0]?.values).toEqual(['now answered']);
+  });
+
+  it('retries once after unusable output, then reports the error', async () => {
+    const fn = vi.fn().mockResolvedValue({ nope: 1 });
+    await expect(solveBatch([text(1), text(2)], '', fn)).rejects.toThrow();
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not ask again during a provider outage', async () => {
+    const fn = vi.fn().mockRejectedValue(Object.assign(new Error('Busy'), { status: 503 }));
+    await expect(solveBatch([text(1), text(2)], '', fn)).rejects.toThrow('Busy');
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it('requires every field and an explanation for each question', () => {
+    const schema = buildBatchSchema([text(1), text(2)]) as {
+      required: string[];
+      properties: { answers: { required: string[] } };
+    };
+    expect(schema.properties.answers.required).toEqual(['k1', 'k2']);
+    expect(schema.required).toContain('perQuestion');
+    expect(Object.keys(schema.properties).indexOf('steps')).toBeLessThan(
+      Object.keys(schema.properties).indexOf('answers'),
+    );
+  });
+
+  it('splits very long pages, without separating a matching set', () => {
+    const many = Array.from({ length: 60 }, (_, i) => text(i + 1));
+    const chunks = chunkForSolving(many);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.flat()).toHaveLength(60);
+    expect(chunks.every((c) => c.length <= 25)).toBe(true);
   });
 });
 

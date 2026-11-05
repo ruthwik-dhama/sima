@@ -30,13 +30,18 @@ Sima enforces what it can see, and stays off on anything that looks like an asse
 - **Sent externally:** only when the user asks Sima to work through a question. The text, tables, image descriptions and field labels for that question go to the chosen provider, after a disclosure the user acknowledges. There's no Sima backend and no analytics.
 - **Deleting:** Settings has separate controls for saved activities and API keys. Removing the extension deletes everything.
 
+## Page layout captures
+
+**Save page layout** creates a file on the user's computer and sends nothing. It's built from an allowlist of structural details, not by removing things from a copy of the page, so text, values, links, titles and data attribute values have no path into it. Numbers in identifiers become `#`. Pages that look like assessments are refused. A class or field name could still contain a personal word, which is why users should check the file before sharing it. `tests/integration/capture.test.ts` plants secrets in every place a page can hold them.
+
 ## Permissions
 
-| Permission                           | Why                                                |
-| ------------------------------------ | -------------------------------------------------- |
-| `storage`                            | Preferences and keys                               |
-| Host access to the three platforms   | Reading and filling activities                     |
-| Optional host access to one provider | Requested when you test that provider's connection |
+| Permission                              | Why                                                                                                       |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `storage`                               | Preferences and keys                                                                                      |
+| Host access to the three platforms      | Reading and filling activities                                                                            |
+| Host access to Google's Gemini API      | The default provider for adults, so setup doesn't stop on a prompt. Nothing is sent until you paste a key |
+| Optional host access to other providers | Requested when you test that provider's connection                                                        |
 
 ## Known gaps
 
