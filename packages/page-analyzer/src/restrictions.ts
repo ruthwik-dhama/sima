@@ -1,7 +1,9 @@
 import type { Restriction, RestrictionSignal } from '@sima/shared-types';
 import { visibleText } from './dom';
 
-const TITLE_PATTERN = /\b(exam|midterm|final|test|quiz|assessment)\b/i;
+// Language courses title assessments in the language being taught.
+const TITLE_PATTERN =
+  /(?:^|[^\p{L}])(exam|midterm|final|test|quiz|assessment|examen|prueba|parcial|cuestionario|contrôle|évaluation|esame|verifica|prüfung|klausur|teste)(?:$|[^\p{L}])/iu;
 const NOT_RESTRICTED_TITLE = /\b(practice|study guide|review sheet|self[- ]check)\b/i;
 
 const BODY_RULES: Array<{ code: RestrictionSignal['code']; pattern: RegExp }> = [

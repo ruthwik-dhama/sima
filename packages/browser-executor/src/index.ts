@@ -3,6 +3,7 @@ import {
   type ActionFailure,
   type ActionResult,
   type BrowserAction,
+  type CustomSelect,
 } from '@sima/shared-types';
 import { isHidden, normalizeSpace, resolveTarget } from '@sima/page-analyzer';
 
@@ -115,6 +116,51 @@ function wait(doc: Document, ms: number): Promise<void> {
   return new Promise((resolve) => (doc.defaultView ?? globalThis).setTimeout(resolve, ms));
 }
 
+const LIST_OPEN_TIMEOUT_MS = 1000;
+const LIST_POLL_MS = 50;
+
+function pressLikeAPerson(el: Element): void {
+  const win = el.ownerDocument.defaultView;
+  if (!win) return;
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+    el.dispatchEvent(new win.MouseEvent(type, { bubbles: true, cancelable: true }));
+  }
+  (el as HTMLElement).click();
+}
+
+/** Opens a site's dropdown, clicks the matching visible option, and confirms the <select> changed. */
+async function chooseFromCustomSelect(
+  action: Extract<BrowserAction, { type: 'select_option' }>,
+  custom: CustomSelect,
+  select: HTMLSelectElement,
+  doc: Document,
+): Promise<ActionResult> {
+  const button = resolveTarget(doc, custom.button);
+  if ('failure' in button) return fail(action, button.failure, 'The dropdown button is missing');
+  if (isHidden(button.el) || (button.el as HTMLButtonElement).disabled) {
+    return fail(action, 'target_disabled', 'The dropdown button is not available');
+  }
+  const index = Array.from(select.options).findIndex((o) => o.value === action.optionValue);
+
+  pressLikeAPerson(button.el);
+  const started = Date.now();
+  let option: Element | undefined;
+  while (!option && Date.now() - started < LIST_OPEN_TIMEOUT_MS) {
+    option = Array.from(doc.querySelectorAll(custom.optionSelector)).find(
+      (candidate) =>
+        candidate.getAttribute(custom.indexAttribute) === String(index) && !isHidden(candidate),
+    );
+    if (!option) await wait(doc, LIST_POLL_MS);
+  }
+  if (!option) return fail(action, 'option_missing', 'The dropdown list did not open');
+
+  pressLikeAPerson(option);
+  await wait(doc, SETTLE_MS);
+  return select.value === action.optionValue
+    ? result(action, { status: 'verified', observed: select.value, detail: 'Chosen from the list' })
+    : fail(action, 'not_persisted', 'Clicked the option, but the dropdown did not change');
+}
+
 /** Reads whether an action's effect is present, without changing the page. Used during recovery. */
 export function checkAction(input: BrowserAction, doc: Document): ActionResult {
   const action = BrowserActionSchema.parse(input);
@@ -146,7 +192,9 @@ export async function executeAction(
   const { el } = resolved;
   const control = el as HTMLInputElement;
 
-  if (isHidden(el)) return fail(action, 'target_disabled', 'Target is not visible');
+  // A custom dropdown's <select> is hidden by design. Its visible button is what gets checked.
+  const custom = action.type === 'select_option' ? action.customSelect : undefined;
+  if (isHidden(el) && !custom) return fail(action, 'target_disabled', 'Target is not visible');
   if (control.disabled || control.readOnly)
     return fail(action, 'target_disabled', 'Target is disabled or read-only');
 
@@ -181,6 +229,10 @@ export async function executeAction(
       observed: want,
       detail: 'Already had this value',
     });
+  }
+
+  if (action.type === 'select_option' && custom) {
+    return chooseFromCustomSelect(action, custom, el as unknown as HTMLSelectElement, ctx.doc);
   }
 
   apply(el, action);

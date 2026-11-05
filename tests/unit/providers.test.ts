@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createProvider, ProviderError } from '@sima/model-providers';
+import { createProvider, geminiFallbacks, isBusy, ProviderError } from '@sima/model-providers';
 import { SOLUTION_JSON_SCHEMA } from '@sima/reasoning-engine';
 import type { ProviderId } from '@sima/shared-types';
 
@@ -105,5 +105,99 @@ describe('provider request shapes', () => {
     await expect(
       createProvider('ollama', { apiKey: '', fetch: f }).completeStructured(request),
     ).rejects.toThrow('not valid JSON');
+  });
+});
+
+describe('request time limits', () => {
+  it('gives a local model longer than an online provider', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout');
+    await createProvider('ollama', {
+      apiKey: '',
+      fetch: respond(replies.ollama),
+    }).completeStructured(request);
+    expect(spy).toHaveBeenLastCalledWith(300_000);
+    await createProvider('gemini', {
+      apiKey: KEY,
+      fetch: respond(replies.gemini),
+    }).completeStructured(request);
+    expect(spy).toHaveBeenLastCalledWith(120_000);
+    spy.mockRestore();
+  });
+});
+
+describe('busy providers', () => {
+  const noWait = vi.fn(async () => {});
+  const busy = (status = 503, headers: Record<string, string> = {}) =>
+    new Response('{"error":{"message":"high demand","status":"UNAVAILABLE"}}', { status, headers });
+  const ok = (id: ProviderId) => new Response(JSON.stringify(replies[id]));
+  const queue = (...responses: Response[]) => {
+    const fn = vi.fn();
+    for (const response of responses) fn.mockResolvedValueOnce(response);
+    return fn as unknown as typeof fetch & ReturnType<typeof vi.fn>;
+  };
+
+  it('retries after a 503, then succeeds', async () => {
+    const f = queue(busy(), ok('ollama'));
+    const provider = createProvider('ollama', { apiKey: '', fetch: f, sleep: noWait });
+    expect(await provider.completeStructured(request)).toEqual(result);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up with a plain message, not the raw error', async () => {
+    const f = queue(busy(), busy(), busy());
+    const provider = createProvider('ollama', { apiKey: '', fetch: f, sleep: noWait });
+    const error = await provider.completeStructured(request).catch((e: unknown) => e);
+    expect(f).toHaveBeenCalledTimes(3);
+    expect((error as Error).message).toContain('very busy');
+    expect((error as Error).message).not.toMatch(/503|UNAVAILABLE/);
+    expect(isBusy(error)).toBe(true);
+  });
+
+  it('explains a rate limit, and waits as long as the provider asks', async () => {
+    const sleep = vi.fn(async () => {});
+    const f = queue(busy(429, { 'retry-after': '9' }), busy(429), busy(429));
+    const provider = createProvider('ollama', { apiKey: '', fetch: f, sleep });
+    const error = await provider.completeStructured(request).catch((e: unknown) => e);
+    expect(sleep.mock.calls[0]).toEqual([9000]);
+    expect((error as Error).message).toContain('limit');
+  });
+
+  it('does not retry a bad key', async () => {
+    const f = queue(new Response('nope', { status: 401 }));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep: noWait });
+    await expect(provider.completeStructured(request)).rejects.toThrow('Check the API key');
+    expect(f).toHaveBeenCalledOnce();
+  });
+
+  it('moves a busy Gemini request to another free model', async () => {
+    const models = {
+      models: [
+        'gemini-3.8-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-4-argon',
+      ].map((id) => ({ name: `models/${id}`, supportedGenerationMethods: ['generateContent'] })),
+    };
+    const f = queue(busy(), busy(), busy(), new Response(JSON.stringify(models)), ok('gemini'));
+    const provider = createProvider('gemini', { apiKey: KEY, fetch: f, sleep: noWait });
+    expect(await provider.completeStructured({ ...request, model: 'gemini-3.8-flash' })).toEqual(
+      result,
+    );
+    expect(String(f.mock.calls[4]?.[0])).toContain('gemini-3.6-flash');
+  });
+
+  it('ranks fallbacks: full Flash models, then Flash-Lite, never paid-only or special models', () => {
+    expect(
+      geminiFallbacks(
+        [
+          'gemini-3.8-flash',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash-lite',
+          'gemini-4-argon',
+          'gemini-3.8-flash-tts',
+        ],
+        'gemini-3.8-flash',
+      ),
+    ).toEqual(['gemini-3.6-flash', 'gemini-3.5-flash-lite']);
   });
 });

@@ -37,6 +37,7 @@ export const UiCommandSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('GET_SETTINGS') }),
   z.object({ type: z.literal('SAVE_SETTINGS'), settings: SettingsSchema }),
+  z.object({ type: z.literal('SET_BIRTH_DATE'), birthDate: z.string().max(10) }),
   z.object({
     type: z.literal('SET_API_KEY'),
     provider: ProviderIdSchema,
@@ -47,6 +48,7 @@ export const UiCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('DELETE_TASK_DATA') }),
   z.object({ type: z.literal('DELETE_API_KEYS') }),
   z.object({ type: z.literal('OPEN_POPUP') }),
+  z.object({ type: z.literal('CAPTURE_PAGE'), tabId: z.number() }),
   z.object({ type: z.literal('DISMISS_FLOATING') }),
 ]);
 export type UiCommand = z.infer<typeof UiCommandSchema>;
@@ -62,6 +64,7 @@ export type ContentEvent = z.infer<typeof ContentEventSchema>;
 /** Messages from the background to the content script. */
 export const ContentCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ANALYZE_PAGE') }),
+  z.object({ type: z.literal('CAPTURE_PAGE') }),
   z.object({ type: z.literal('EXECUTE_ACTION'), action: BrowserActionSchema }),
   z.object({ type: z.literal('CHECK_ACTION'), action: BrowserActionSchema }),
   z.object({ type: z.literal('FLOATING_STATE'), state: z.lazy(() => FloatingStateSchema) }),
@@ -75,6 +78,7 @@ export const FloatingStateSchema = z.object({
   done: z.number(),
   total: z.number(),
   restricted: z.boolean(),
+  note: z.string().nullable().optional(),
 });
 export type FloatingState = z.infer<typeof FloatingStateSchema>;
 

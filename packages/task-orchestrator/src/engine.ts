@@ -1,5 +1,10 @@
 import { autoFillHold, buildNavigateAction, buildPlan } from '@sima/action-planner';
-import { buildFollowUpPrompt, FOLLOW_UP_JSON_SCHEMA, solveQuestion } from '@sima/reasoning-engine';
+import {
+  buildFollowUpPrompt,
+  FOLLOW_UP_JSON_SCHEMA,
+  chunkForSolving,
+  solveBatch,
+} from '@sima/reasoning-engine';
 import {
   FollowUpResponseSchema,
   type ActionFailure,
@@ -55,6 +60,7 @@ export interface Reasoner {
     prompt: { system: string; user: string },
     schema: Readonly<Record<string, unknown>>,
     name: string,
+    hooks?: { onBusy?: () => Promise<void> },
   ): Promise<unknown>;
   /** Throws when the provider is unconfigured or its data disclosure was not acknowledged. */
   assertReady(): Promise<void>;
@@ -67,32 +73,6 @@ export interface EngineDeps {
   now?: () => number;
   newId?: () => string;
   onChange?: (taskId: string) => void;
-}
-
-/** Fields holding only what Sima entered. Replacing those can't lose anything the student typed. */
-function fieldsEnteredBySima(record: QuestionRecord, journal: ActionRecord[]): string[] {
-  return record.question.fields
-    .filter((field) => {
-      const entered = journal
-        .filter(
-          (entry) =>
-            entry.status === 'verified' &&
-            entry.action.questionId === record.question.id &&
-            entry.action.fieldKey === field.key,
-        )
-        .flatMap(({ action }) => {
-          if (action.type === 'fill_text') return [action.value];
-          if (action.type === 'select_option') return [action.optionValue];
-          if (action.type === 'select_radio' || action.type === 'set_checkbox') {
-            return [action.optionId];
-          }
-          return [];
-        });
-      return (
-        field.currentValues.length > 0 && field.currentValues.every((v) => entered.includes(v))
-      );
-    })
-    .map((field) => field.key);
 }
 
 export function hasResponse(record: QuestionRecord): boolean {
@@ -149,10 +129,21 @@ export class TaskEngine {
     const current = await this.require(taskId);
     if (onlyFrom && !onlyFrom.includes(current.status)) return current;
     assertTransition(current.status, status);
-    const next: Task = { ...current, ...patch, status, updatedAt: this.now() };
+    const next: Task = { ...current, activityNote: null, ...patch, status, updatedAt: this.now() };
     await this.store.putTask(next);
     this.onChange(next.id);
     return next;
+  }
+
+  /** Records what a running step is doing. A stopped or paused task keeps no note. */
+  private async setNote(taskId: string, activityNote: string): Promise<void> {
+    await this.locked(async () => {
+      const current = await this.require(taskId);
+      if (BUSY.includes(current.status)) {
+        await this.store.putTask({ ...current, activityNote, updatedAt: this.now() });
+      }
+    });
+    this.onChange(taskId);
   }
 
   private setStatus(
@@ -362,42 +353,82 @@ export class TaskEngine {
     const records = await this.store.getQuestions(taskId, task.currentPageKey);
     if (!(await this.claim(taskId, 'reasoning'))) return;
 
-    for (const record of records) {
-      if (questionIds && !questionIds.includes(record.question.id)) continue;
-      // A saved solution with no answer isn't finished, so it gets another try.
-      if (!questionIds && hasResponse(record)) continue;
-      // Reload each time so pause and stop take effect between questions.
+    // A saved solution with no answer isn't finished, so it gets another try.
+    const pending = records.filter((record) =>
+      questionIds ? questionIds.includes(record.question.id) : !hasResponse(record),
+    );
+    let busyError: string | null = null;
+    const chunks = chunkForSolving(pending.map((record) => record.question));
+    if (chunks.length > 0) await this.setNote(taskId, 'Answering questions…');
+    for (const [index, chunk] of chunks.entries()) {
+      // Reload each time so pause and stop take effect between requests.
       task = await this.require(taskId);
       if (task.status !== 'reasoning') return;
-      await this.solveOne(record, analysis?.instructions ?? '');
+      if (index > 0)
+        await this.setNote(taskId, `Answering questions, part ${index + 1} of ${chunks.length}…`);
+      const members = chunk.flatMap((question) => pending.filter((r) => r.question === question));
+      // Once a provider says it's overloaded, more requests only add to the wait.
+      if (busyError) {
+        for (const record of members) {
+          await this.updateRecord(record.id, (latest) => ({ ...latest, solveError: busyError }));
+        }
+        this.onChange(taskId);
+        continue;
+      }
+      busyError = await this.solveMembers(members, analysis?.instructions ?? '');
     }
     await this.setStatus(task, 'review', {}, ['reasoning']);
   }
 
-  private async solveOne(record: QuestionRecord, instructions: string): Promise<void> {
+  /** Solves one group. Returns the error text if the provider was overloaded or rate limited. */
+  private async solveMembers(
+    members: QuestionRecord[],
+    instructions: string,
+  ): Promise<string | null> {
+    const taskId = members[0]?.taskId;
+    if (!taskId) return null;
     try {
-      const solution = await solveQuestion(record.question, instructions, (prompt, schema, name) =>
-        this.reasoner.complete(prompt, schema, name),
+      const solutions = await solveBatch(
+        members.map((record) => record.question),
+        instructions,
+        (prompt, schema, name) =>
+          this.reasoner.complete(prompt, schema, name, {
+            onBusy: () => this.setNote(taskId, 'The AI is busy, retrying…'),
+          }),
       );
-      const responses = Object.fromEntries(solution.answers.map((a) => [a.fieldKey, a.values]));
-      // A new answer needs fresh approval. Anything else the user did meanwhile is kept.
-      await this.updateRecord(record.id, (latest) => ({
-        ...latest,
-        solution,
-        solveError: null,
-        responses,
-        approved: false,
-      }));
+      for (const record of members) {
+        const solution = solutions.get(record.question.id);
+        if (!solution) {
+          const solveError = 'The model skipped this question. Click the button again to retry.';
+          await this.updateRecord(record.id, (latest) => ({ ...latest, solveError }));
+          continue;
+        }
+        const responses = Object.fromEntries(solution.answers.map((a) => [a.fieldKey, a.values]));
+        // A new answer needs fresh approval. Anything else the user did meanwhile is kept.
+        await this.updateRecord(record.id, (latest) => ({
+          ...latest,
+          solution,
+          solveError: null,
+          responses,
+          approved: false,
+        }));
+      }
     } catch (error) {
       const solveError = error instanceof Error ? error.message : 'Could not solve';
-      await this.updateRecord(record.id, (latest) => ({ ...latest, solveError }));
+      for (const record of members) {
+        await this.updateRecord(record.id, (latest) => ({ ...latest, solveError }));
+      }
+      this.onChange(taskId);
+      const status = (error as { status?: number } | null)?.status;
+      return status === 429 || status === 503 ? solveError : null;
     }
-    this.onChange(record.taskId);
+    this.onChange(taskId);
+    return null;
   }
 
   /**
    * One click: solve what's unsolved, approve what passed every check, and enter it. Questions
-   * that didn't pass stay unapproved for the user. Still needs the activity's authorization.
+   * without an answer stay unapproved for the user. Still needs the activity's authorization.
    */
   async autoFill(taskId: string): Promise<void> {
     const task = await this.require(taskId);
@@ -410,19 +441,13 @@ export class TaskEngine {
     await this.solve(taskId);
     const solved = await this.require(taskId);
     if (solved.status !== 'review') return;
-    // Read the boxes now, so an answer typed since the last read counts as the student's own.
-    if (solved.tabId !== null) {
-      const analysis = await this.page.analyze(solved.tabId);
-      if (analysis?.pageKey === solved.currentPageKey) await this.refreshFields(taskId, analysis);
-    }
-    const journal = await this.store.getActions(taskId);
+    // Clicking Fill answers is the request to enter these, so anything in the boxes is replaced.
     for (const record of await this.store.getQuestions(taskId, solved.currentPageKey)) {
       if (autoFillHold(record) !== null) continue;
-      const own = fieldsEnteredBySima(record, journal);
       await this.updateRecord(record.id, (latest) => ({
         ...latest,
         approved: true,
-        overwriteFields: [...new Set([...latest.overwriteFields, ...own])],
+        overwriteFields: latest.question.fields.map((field) => field.key),
       }));
     }
     this.onChange(taskId);
@@ -542,9 +567,10 @@ export class TaskEngine {
   ): Promise<'done' | 'retryable' | 'failed' | 'interrupted'> {
     let retryable = false;
     let failed = false;
-    for (const action of actions) {
+    for (const [index, action] of actions.entries()) {
       const task = await this.require(taskId);
       if (task.status !== 'executing') return 'interrupted';
+      await this.setNote(taskId, `Entering ${index + 1} of ${actions.length}…`);
 
       // Any journal entry means this exact action ran or may have run: look before acting.
       const journal = await this.store.getAction(action.id);

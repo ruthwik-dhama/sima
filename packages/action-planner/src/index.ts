@@ -67,6 +67,7 @@ function planField(
           id: actionId(taskId, record, [field.key, 'select', value]),
           target: field.target,
           optionValue: value,
+          ...(field.customSelect ? { customSelect: field.customSelect } : {}),
         },
       ];
     case 'radio_group': {

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  PROVIDER_ENDPOINTS,
   SettingsSchema,
   type ProviderId,
   type Settings,
@@ -42,4 +43,14 @@ export async function deleteApiKeys(): Promise<void> {
 export async function configuredProviders(): Promise<ProviderId[]> {
   const stored = await chrome.storage.local.get(ALL_PROVIDERS.map(keyName));
   return ALL_PROVIDERS.filter((p) => typeof stored[keyName(p)] === 'string');
+}
+
+/** Refuses a provider this user's age check doesn't allow. Enforced here, not just in the UI. */
+export function assertProviderAllowed(settings: Settings, provider: ProviderId): void {
+  if (settings.ageCheck === 'unset') {
+    throw new Error('Enter your birth date in Sima first.');
+  }
+  if (settings.ageCheck === 'minor' && PROVIDER_ENDPOINTS[provider].external) {
+    throw new Error('Online AI providers are for people 18 and older. Sima uses Ollama for you.');
+  }
 }

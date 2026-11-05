@@ -10,6 +10,7 @@ pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm test:e2e
 
 ## Adding a platform
 
+0. **Capture the real layout.** Follow [Testing on real sites](docs/TESTING-LIVE-SITES.md).
 1. **Build a mock.** Add `playground/<platform>/` with original content that reproduces the real layout's structure, including a restricted page. Update `playground/index.html`.
 2. **Write the adapter.** Create `adapters/<platform>` implementing `PlatformAdapter`, with every selector inside it. Set `compatibility: 'mock_only'`. Add any assessment markers the platform has to `platformRestrictions` and `detectPage`.
 3. **Register it.** Add it to `apps/extension/services/adapters.ts`, and add its hosts to `host_permissions` in `wxt.config.ts` and to `matches` in `entrypoints/content/index.tsx`. Keep hosts as narrow as you can.

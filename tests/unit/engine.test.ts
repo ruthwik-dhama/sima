@@ -301,6 +301,128 @@ describe('execute', () => {
   });
 });
 
+describe('matching sets in the engine', () => {
+  const pair = () => {
+    const options = [
+      { id: 'x', label: 'X' },
+      { id: 'y', label: 'Y' },
+    ];
+    const select = (key: string) => ({
+      ...question().fields[0]!,
+      key,
+      kind: 'select' as const,
+      options,
+    });
+    return analysis({
+      questions: [
+        { ...question(), id: 'q1', fields: [select('a')] },
+        { ...question(), id: 'q2', fields: [select('b')] },
+      ],
+    });
+  };
+
+  it('solves the set in one call, and records an answer on each question', async () => {
+    reasoner.complete.mockResolvedValue({
+      ...solution,
+      answers: { a: ['a'], b: ['b'] },
+      calculations: [],
+    });
+    const task = await engine.onPageReady(1, pair());
+    await engine.solve(task.id);
+    expect(reasoner.complete).toHaveBeenCalledOnce();
+    expect((await store.getQuestion(recordId(task.id, 'p1', 'q1')))?.responses).toEqual({
+      a: ['x'],
+    });
+    expect((await store.getQuestion(recordId(task.id, 'p1', 'q2')))?.responses).toEqual({
+      b: ['y'],
+    });
+  });
+
+  it('reports a failed set on every question in it', async () => {
+    reasoner.complete.mockRejectedValue(new Error('Model unavailable'));
+    const task = await engine.onPageReady(1, pair());
+    await engine.solve(task.id);
+    for (const id of ['q1', 'q2']) {
+      expect((await store.getQuestion(recordId(task.id, 'p1', id)))?.solveError).toContain(
+        'unavailable',
+      );
+    }
+  });
+});
+
+describe('progress notes', () => {
+  it('shows answering, then entering, and clears the note when done', async () => {
+    const notes: Array<string | null | undefined> = [];
+    const watching = new TaskEngine({
+      store,
+      page: page as unknown as PagePort,
+      reasoner: reasoner as unknown as Reasoner,
+      onChange: (id) =>
+        void store.getTask(id).then((t) => {
+          if (t?.activityNote) notes.push(t.activityNote);
+        }),
+    });
+    const task = await watching.onPageReady(1, analysis());
+    await watching.authorizeFill(task.id, true);
+    await watching.autoFill(task.id);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(notes).toContain('Answering questions…');
+    expect(notes).toContain('Entering 1 of 1…');
+    expect((await store.getTask(task.id))?.activityNote).toBeNull();
+  });
+
+  it('reports a busy provider while it retries', async () => {
+    reasoner.complete.mockImplementationOnce(
+      async (_p: unknown, _s: unknown, _n: unknown, hooks: { onBusy: () => Promise<void> }) => {
+        const task = (await store.findTaskByTab(1))!;
+        await hooks.onBusy();
+        expect((await store.getTask(task.id))?.activityNote).toContain('busy');
+        return solution;
+      },
+    );
+    const task = await engine.onPageReady(1, analysis());
+    await engine.solve(task.id);
+    expect((await store.getTask(task.id))?.status).toBe('review');
+  });
+});
+
+describe('a busy provider', () => {
+  const busy = () => Object.assign(new Error('Very busy'), { status: 503 });
+  const two = () =>
+    analysis({
+      questions: [
+        question(),
+        { ...question(), id: 'q2', fields: [{ ...question().fields[0]!, key: 'b' }] },
+      ],
+    });
+
+  it('stops asking after the first busy reply, and shows it on every question', async () => {
+    reasoner.complete.mockRejectedValue(busy());
+    const task = await engine.onPageReady(1, two());
+    await engine.solve(task.id);
+    expect(reasoner.complete).toHaveBeenCalledOnce();
+    for (const id of ['q1', 'q2']) {
+      expect((await store.getQuestion(recordId(task.id, 'p1', id)))?.solveError).toBe('Very busy');
+    }
+    expect((await store.getTask(task.id))?.status).toBe('review');
+  });
+
+  it('solves everything when clicked again once the provider recovers', async () => {
+    reasoner.complete.mockRejectedValueOnce(busy());
+    reasoner.complete.mockResolvedValue({
+      ...solution,
+      answers: { a: ['4'], b: ['5'] },
+      calculations: [],
+    });
+    const task = await engine.onPageReady(1, two());
+    await engine.solve(task.id);
+    await engine.solve(task.id);
+    const record = await store.getQuestion(recordId(task.id, 'p1', 'q1'));
+    expect(record?.solveError).toBeNull();
+    expect(record?.responses.a).toEqual(['4']);
+  });
+});
+
 describe('one-click fill', () => {
   it('solves, approves and enters answers that pass every check', async () => {
     const task = await engine.onPageReady(1, analysis());
@@ -419,18 +541,14 @@ describe('one-click fill', () => {
     expect(page.execute.mock.calls[0]?.[1]).toMatchObject({ value: '5' });
   });
 
-  it('never replaces what the student typed without being allowed', async () => {
+  it('replaces whatever is in the box, without asking', async () => {
     const typed = analysis({ questions: [question(['my answer'])] });
     page.analyze.mockResolvedValue(typed);
     const task = await engine.onPageReady(1, typed);
     await engine.authorizeFill(task.id, true);
     await engine.autoFill(task.id);
-    expect(page.execute).not.toHaveBeenCalled();
-    const view = await engine.view(1);
-    expect(view.plan.blockers[0]?.code).toBe('existing_value');
-    await engine.allowOverwrite(recordId(task.id, 'p1', 'q1'), 'a');
-    await engine.autoFill(task.id);
     expect(page.execute).toHaveBeenCalledOnce();
+    expect(page.execute.mock.calls[0]?.[1]).toMatchObject({ value: '4' });
   });
 
   it('enters an answer the student typed when the model gave none', async () => {

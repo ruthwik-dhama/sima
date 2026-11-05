@@ -1,6 +1,6 @@
 import type { Question } from '@sima/shared-types';
 import { isHidden, normalizeSpace, visibleText } from './dom';
-import { detectFields, inferFormat } from './fields';
+import { detectFields, inferFormat, type DetectFieldsOptions } from './fields';
 import { findSuspiciousText, removeTextAimedAtAi } from './restrictions';
 
 export interface QuestionExtractionOptions {
@@ -11,6 +11,12 @@ export interface QuestionExtractionOptions {
   promptEl?: Element;
   /** Subtrees to leave out of the prompt, such as buttons or platform chrome. */
   excludeFromPrompt?: (el: Element) => boolean;
+  /** Mark every blank in the text, even a lone or labeled one. For fill-in-the-sentence layouts. */
+  markAllBlanks?: boolean;
+  /** Where a control appears in the text, when a site draws it somewhere other than the control. */
+  blankAnchor?: (control: Element) => Element;
+  customSelect?: DetectFieldsOptions['customSelect'];
+  isPlaceholderOption?: DetectFieldsOptions['isPlaceholderOption'];
 }
 
 export function extractTables(root: Element): string[][][] {
@@ -34,14 +40,19 @@ export function extractImages(root: Element): Array<{ src: string; alt: string }
 
 /** Builds a Question from one question container. Platform adapters choose the containers. */
 export function extractQuestion(container: Element, options: QuestionExtractionOptions): Question {
-  const fields = detectFields(container, options.id);
+  const fields = detectFields(container, options.id, {
+    ...(options.customSelect ? { customSelect: options.customSelect } : {}),
+    ...(options.isPlaceholderOption ? { isPlaceholderOption: options.isPlaceholderOption } : {}),
+  });
   // Unlabeled blanks are identified by where they sit, so mark that in the question text.
-  const blanks = fields.filter((f) => !f.label && f.options.length === 0);
+  const blanks = options.markAllBlanks
+    ? fields.filter((f) => f.kind !== 'radio_group' && f.kind !== 'checkbox_group')
+    : fields.filter((f) => !f.label && f.options.length === 0);
   const markers = new Map<Element, string>();
-  if (blanks.length > 1) {
+  if (blanks.length > 1 || (options.markAllBlanks && blanks.length > 0)) {
     for (const blank of blanks) {
       const el = container.ownerDocument.querySelector(blank.target.selector);
-      if (el) markers.set(el, `[${blank.key}]`);
+      if (el) markers.set(options.blankAnchor?.(el) ?? el, `[${blank.key}]`);
     }
   }
   const promptRoot = options.promptEl ?? container;

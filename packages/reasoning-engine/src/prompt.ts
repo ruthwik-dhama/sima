@@ -89,6 +89,10 @@ Rules:
 - Always give an answer for every field, using the exact fieldKey supplied. Copy your final result from steps into answers.
 - For a fill-in-the-blank, give only the word or words that go in the blank, not the whole sentence.
 - A [fieldKey] in the question text marks where that blank sits. Use the words around it to decide what goes in each blank. When order doesn't matter, such as the roots of an equation, give each correct value once, in any order.
+- Follow the activity's directions, and any example or Modelo, which shows the exact format of a right answer. Text marked «like this» in an example is the answer part.
+- If there is a word list, choose from it, then put the word in the form the sentence needs. Never answer with an unchanged dictionary form when the sentence needs a conjugated verb.
+- For a verb, first write in steps its subject, whether that subject is singular or plural, and the tense or mood the sentence or directions require. A plural noun takes a plural verb. Include the reflexive pronoun with a reflexive verb, unless it is already in the sentence.
+- Read the whole sentence with your answer in the blank before finishing. Give only the words that belong in the blank, and never repeat a word already next to it: for "que me [blank] (llamar)" the answer is "llame", not "me llame".
 - Follow any length or format the question asks for, such as "in two sentences".
 - For fields listing options, values must contain the letter of the option, never its text: a is the first choice, b the second, c the third, and so on. Radio and select fields take one letter; checkbox (select all that apply) fields take the letter of every correct choice. Lists too long for letters show an id to use instead.
 - For text fields, values contains one string. Preserve required units, significant figures, precision, and accents and other language-specific characters.
@@ -136,13 +140,26 @@ function renderTable(table: string[][]): string {
   return table.map((row) => row.join(' | ')).join('\n');
 }
 
+/** For items that share one list of choices, which only make sense when decided together. */
+const SET_RULE = `Questions that share one list of choices should be decided as a set. Each is an unfinished sentence, and the choice goes where its marker is. In steps, write out each one in full with the choice that makes the most sense, and check it reads as a natural sentence with matching meaning and grammar. Use each choice for one question only when there are at least as many choices as questions in the set. Then copy those decisions into answers.`;
+
+function renderOptions(field: Question['fields'][number]): string {
+  return field.options
+    .map((o, i) => `    ${optionLetter(i, field.options.length) ?? o.id}: ${o.label}`)
+    .join('\n');
+}
+
 export function renderQuestion(question: Question, instructions: string): string {
+  const [first] = question.fields;
+  // Items sharing one list show it once, because repeating it for each buries the items.
+  const shared =
+    question.fields.length > 1 &&
+    first !== undefined &&
+    first.options.length > 0 &&
+    question.fields.every((f) => renderOptions(f) === renderOptions(first));
   const fields = question.fields.map((field) => {
-    const options = field.options.length
-      ? `\n  options:\n${field.options
-          .map((o, i) => `    ${optionLetter(i, field.options.length) ?? o.id}: ${o.label}`)
-          .join('\n')}`
-      : '';
+    const options =
+      field.options.length > 0 && !shared ? `\n  options:\n${renderOptions(field)}` : '';
     return `- fieldKey: ${field.key}\n  type: ${field.kind}\n  label: ${field.label || '(none)'}${options}`;
   });
   const parts = [
@@ -150,9 +167,105 @@ export function renderQuestion(question: Question, instructions: string): string
     `Question ${question.number}:\n${question.prompt}`,
     ...question.tables.map((table, i) => `Table ${i + 1}:\n${renderTable(table)}`),
     ...question.images.map((image) => `Image: ${image.alt || 'no description available'}`),
+    shared && first ? `Choices for every item:\n${renderOptions(first)}` : '',
     `Fields to answer:\n${fields.join('\n')}`,
   ];
   return parts.filter(Boolean).join('\n\n');
+}
+
+/** One question inside a batch: its text and fields, with shared choices left to its group. */
+function renderBatchItem(question: Question, label: number, sharedChoices: boolean): string {
+  const fields = question.fields.map((field) => {
+    const options =
+      field.options.length > 0 && !sharedChoices ? `\n  options:\n${renderOptions(field)}` : '';
+    return `- fieldKey: ${field.key}\n  type: ${field.kind}\n  label: ${field.label || '(none)'}${options}`;
+  });
+  return [
+    `Question ${label}:\n${question.prompt}`,
+    ...question.tables.map((table, i) => `Table ${i + 1}:\n${renderTable(table)}`),
+    ...question.images.map((image) => `Image: ${image.alt || 'no description available'}`),
+    `Fields:\n${fields.join('\n')}`,
+  ].join('\n');
+}
+
+function batchFormatRule(questions: Question[]): string {
+  const labels = (test: (q: Question) => boolean) =>
+    questions.flatMap((q, i) => (test(q) ? [i + 1] : [])).join(', ');
+  const explained = labels((q) => asksForExplanation(q.prompt));
+  const worked = labels((q) => asksForWork(q.prompt) && !asksForExplanation(q.prompt));
+  return [
+    'In answers, give only the final answer for each question, with no working or restating of the question: for "Calculate 3^4 + 12" the answer is 93. If a question asks you to write something, such as sentences about a topic, the answer is that writing in full.',
+    explained &&
+      `Questions ${explained} ask for an explanation, so answer those in full sentences.`,
+    worked &&
+      `Questions ${worked} ask to see the work, so answer those step by step, ending with the result.`,
+    'Start every line in steps with its question, like "Question 2: ...", and do the working for every question before answers. In perQuestion, give each question\'s number, a brief explanation, and your honest confidence from 0 to 1.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** The whole page in one request. `groups` are questions that share one list of choices. */
+export function buildBatchPrompt(
+  groups: Question[][],
+  instructions: string,
+): { system: string; user: string } {
+  const questions = groups.flat();
+  const hasSet = groups.some((group) => group.length > 1);
+  const parts = [instructions && `Activity instructions:\n${instructions}`];
+  let label = 0;
+  for (const group of groups) {
+    const [first] = group;
+    const field = first?.fields[0];
+    if (group.length > 1 && field) {
+      parts.push(
+        `Choices for questions ${label + 1} to ${label + group.length}:\n${renderOptions(field)}`,
+      );
+    }
+    for (const question of group) {
+      label++;
+      parts.push(renderBatchItem(question, label, group.length > 1));
+    }
+  }
+  const rules = `- ${batchFormatRule(questions)}\n- Follow any length or format`;
+  const system = SYSTEM_PROMPT.replace('- Follow any length or format', rules);
+  return {
+    system: hasSet ? `${system}\n- ${SET_RULE}` : system,
+    user: fence(parts.filter(Boolean).join('\n\n')),
+  };
+}
+
+export function buildBatchSchema(questions: Question[]): Readonly<Record<string, unknown>> {
+  const [first] = questions;
+  if (!first) return SOLUTION_JSON_SCHEMA;
+  const single = buildSolutionSchema({ ...first, fields: questions.flatMap((q) => q.fields) }) as {
+    properties: Record<string, unknown>;
+  };
+  const { steps, calculations, answers, cannotAnswer } = single.properties;
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['steps', 'calculations', 'answers', 'perQuestion', 'cannotAnswer'],
+    properties: {
+      steps,
+      calculations,
+      answers,
+      perQuestion: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['question', 'explanation', 'confidence'],
+          properties: {
+            question: { type: 'string' },
+            explanation: { type: 'string' },
+            confidence: { type: 'number' },
+          },
+        },
+      },
+      cannotAnswer,
+    },
+  };
 }
 
 /** Removes anything that could close the delimiter, so page text cannot escape the data block. */
@@ -163,9 +276,13 @@ function fence(text: string): string {
 export function buildSolvePrompt(
   question: Question,
   instructions: string,
+  options: { set?: boolean } = {},
 ): { system: string; user: string } {
   return {
-    system: systemPromptFor(question),
+    system: options.set
+      ? `${systemPromptFor(question)}
+- ${SET_RULE}`
+      : systemPromptFor(question),
     user: fence(renderQuestion(question, instructions)),
   };
 }

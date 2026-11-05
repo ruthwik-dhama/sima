@@ -1,4 +1,10 @@
-import type { AnswerField, FieldKind, FieldOption, QuestionFormat } from '@sima/shared-types';
+import type {
+  AnswerField,
+  CustomSelect,
+  FieldKind,
+  FieldOption,
+  QuestionFormat,
+} from '@sima/shared-types';
 import { isHidden, makeTarget, normalizeSpace, visibleText } from './dom';
 
 const TEXT_INPUT_TYPES = new Set(['', 'text', 'number', 'search', 'tel', 'url', 'email']);
@@ -37,10 +43,21 @@ export interface DetectedFields {
 }
 
 /** Finds the answer controls in a question container and scores how sure each mapping is. */
-export function detectFields(container: Element, questionId: string): AnswerField[] {
+export interface DetectFieldsOptions {
+  /** For a site's custom dropdown: how to operate the hidden <select> behind it. */
+  customSelect?: (select: Element) => CustomSelect | null;
+  /** A dropdown's blank default entry, which is neither a choice nor an answer. */
+  isPlaceholderOption?: (option: HTMLOptionElement, index: number) => boolean;
+}
+
+export function detectFields(
+  container: Element,
+  questionId: string,
+  options: DetectFieldsOptions = {},
+): AnswerField[] {
   const controls = Array.from(
     container.querySelectorAll('input, textarea, select, [contenteditable="true"]'),
-  ).filter((el) => !isHidden(el));
+  ).filter((el) => !isHidden(el) || (el.tagName === 'SELECT' && options.customSelect?.(el)));
 
   const fields: AnswerField[] = [];
   const groups = new Map<string, HTMLInputElement[]>();
@@ -82,19 +99,30 @@ export function detectFields(container: Element, questionId: string): AnswerFiel
       : scoped
         ? 'Only control inside the question'
         : 'Unlabeled blank, placed by where it sits in the question';
-    const options: FieldOption[] =
+    const fieldOptions: FieldOption[] =
       kind === 'select'
         ? Array.from((el as HTMLSelectElement).options)
-            .filter((o) => o.value !== '')
+            .filter((o, index) => o.value !== '' && !options.isPlaceholderOption?.(o, index))
             .map((o) => ({ id: o.value, label: normalizeSpace(o.textContent ?? '') }))
         : [];
-    const value = kind === 'contenteditable' ? normalizeSpace(el.textContent ?? '') : readValue(el);
+    const select = el as HTMLSelectElement;
+    const onPlaceholder =
+      kind === 'select' &&
+      select.selectedIndex >= 0 &&
+      options.isPlaceholderOption?.(select.options[select.selectedIndex]!, select.selectedIndex);
+    const value = onPlaceholder
+      ? ''
+      : kind === 'contenteditable'
+        ? normalizeSpace(el.textContent ?? '')
+        : readValue(el);
+    const customSelect = kind === 'select' ? options.customSelect?.(el) : null;
     fields.push({
       key: el.getAttribute('name') || el.id || `${questionId}:f${fields.length + 1}`,
       kind,
       label,
       target: makeTarget(el),
-      options,
+      options: fieldOptions,
+      ...(customSelect ? { customSelect } : {}),
       currentValues: value ? [value] : [],
       mappingConfidence: confidence,
       mappingReason: reason,

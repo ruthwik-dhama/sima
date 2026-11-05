@@ -114,7 +114,8 @@ function FieldRow({
     (b) => b.fieldKey === field.key && b.questionId === record.question.id,
   );
   const entered = field.currentValues.length > 0;
-  const label = field.label || (record.question.fields.length > 1 ? field.key : '');
+  const fields = record.question.fields;
+  const label = field.label || (fields.length > 1 ? `Blank ${fields.indexOf(field) + 1}` : '');
   const stateId = `field-state-${field.key}`;
   return (
     <div className="flex flex-col gap-1.5" data-testid={`field-${field.key}`}>
@@ -166,34 +167,18 @@ function FieldRow({
           </Button>
         </div>
       )}
-      {blocker?.code === 'existing_value' && (
-        <div
-          className="flex items-center justify-between gap-2 rounded-lg bg-warning-surface p-2 text-xs text-warning"
-          data-testid={`overwrite-${field.key}`}
-        >
-          <span>This field holds "{field.currentValues.join(', ').slice(0, 60)}".</span>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7"
-            onClick={() =>
-              void run({ type: 'ALLOW_OVERWRITE', recordId: record.id, fieldKey: field.key })
-            }
-          >
-            Replace it
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
 
 /** The number has its own badge and images their own line, so neither repeats in the text. */
-function promptText(prompt: string, number: string): string {
-  return prompt
-    .replace(new RegExp(`^\\s*Q?${number}[.):]\\s*`, 'i'), '')
-    .replace(/\s*\[image:[^\]]*\]/g, '')
-    .trim();
+function promptText(question: QuestionRecord['question']): string {
+  let text = question.prompt
+    .replace(new RegExp(`^\\s*Q?${question.number}[.):]\\s*`, 'i'), '')
+    .replace(/\s*\[image:[^\]]*\]/g, '');
+  // The model needs each blank's field name, but a person just needs to see a blank.
+  for (const field of question.fields) text = text.replace(`[${field.key}]`, '____');
+  return text.trim();
 }
 
 const MAX_SUMMARY_LENGTH = 12;
@@ -230,9 +215,7 @@ export function QuestionCard({
   const hold = solution && !record.approved ? autoFillHold(record) : null;
   const failed = actions.some((a) => a.action.questionId === question.id && a.status === 'failed');
   const blocked = blockers.some(
-    (b) =>
-      b.questionId === question.id &&
-      (b.code === 'low_mapping_confidence' || b.code === 'existing_value'),
+    (b) => b.questionId === question.id && b.code === 'low_mapping_confidence',
   );
   const attention = Boolean(record.solveError || hold || failed || blocked);
   const entered =
@@ -264,7 +247,7 @@ export function QuestionCard({
           className="min-w-0 flex-1 truncate group-open:font-medium group-open:whitespace-normal"
           data-testid={`prompt-${question.id}`}
         >
-          {promptText(question.prompt, question.number)}
+          {promptText(question)}
         </span>
         {summary && !open && (
           <span

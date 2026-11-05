@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { analyzePage, findAdapter, waitForReady, type PlatformAdapter } from '@sima/adapter-core';
 import { checkAction, executeAction } from '@sima/browser-executor';
+import { capturePageStructure } from '@sima/page-analyzer';
 import {
   ContentCommandSchema,
   type ContentEvent,
@@ -67,6 +68,11 @@ function run(ctx: Parameters<typeof createShadowRootUi>[0], adapter: PlatformAda
           sendResponse(ready ? analyze() : null),
         );
         return true;
+      case 'CAPTURE_PAGE':
+        sendResponse(
+          capturePageStructure(document, new URL(location.href), adapter.id, analyze() !== null),
+        );
+        return false;
       case 'CHECK_ACTION':
         sendResponse(checkAction(command.action, document));
         return false;

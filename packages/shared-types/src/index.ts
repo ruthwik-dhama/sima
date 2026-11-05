@@ -3,4 +3,5 @@ export * from './actions';
 export * from './solution';
 export * from './task';
 export * from './settings';
+export * from './capture';
 export * from './messages';

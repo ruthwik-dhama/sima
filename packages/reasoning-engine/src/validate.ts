@@ -117,12 +117,62 @@ function toFinalAnswer(value: string): string {
   return hasWorking && BARE_NUMBER.test(last) ? last : stated ? candidate : value;
 }
 
+function wordAround(prompt: string, key: string, side: 'before' | 'after'): string | null {
+  const at = prompt.indexOf(`[${key}]`);
+  if (at < 0) return null;
+  const text = side === 'before' ? prompt.slice(0, at) : prompt.slice(at + key.length + 2);
+  const words = text.match(/[\p{L}\p{M}'-]+/gu);
+  if (!words) return null;
+  if (side === 'after' && !/^\s*[\p{L}]/u.test(text)) return null;
+  if (side === 'before' && !/[\p{L}\p{M}'-]\s*$/u.test(text)) return null;
+  return (side === 'before' ? words[words.length - 1] : words[0]) ?? null;
+}
+
+/** "que me [blank]" with the answer "me llame" becomes "llame", so "me" isn't entered twice. */
+function dropRepeatedNeighbors(prompt: string, key: string, value: string): string {
+  const words = value.trim().split(/\s+/);
+  const same = (a: string | undefined, b: string | null) =>
+    a !== undefined && b !== null && a.toLocaleLowerCase() === b.toLocaleLowerCase();
+  if (words.length > 1 && same(words[0], wordAround(prompt, key, 'before'))) words.shift();
+  if (words.length > 1 && same(words[words.length - 1], wordAround(prompt, key, 'after'))) {
+    words.pop();
+  }
+  return words.join(' ');
+}
+
+/** The verb in parentheses right after a blank, like the "llevar" in "[blank] (llevar)". */
+function hintAfter(prompt: string, key: string): string | null {
+  const at = prompt.indexOf(`[${key}]`);
+  if (at < 0) return null;
+  return (
+    prompt
+      .slice(at + key.length + 2)
+      .match(/^\s*\(([^)]+)\)/)?.[1]
+      ?.trim() ?? null
+  );
+}
+
+function wordListIn(instructions: string): string[] {
+  const line = instructions.match(/^Word list: (.+)$/m)?.[1];
+  return line ? line.split(',').map((w) => w.trim().toLocaleLowerCase()) : [];
+}
+
+export interface ValidateOptions {
+  instructions?: string;
+  /** Each choice belongs to one item: the items are a matching set with enough choices. */
+  uniqueChoices?: boolean;
+}
+
 /**
  * Checks a parsed model answer against the question it answers, and corrects what arithmetic can
  * settle. Anything naming a field or option the page lacks is dropped here, so it can't reach
  * the action planner.
  */
-export function validateSolution(question: Question, solution: ModelSolution): ValidatedSolution {
+export function validateSolution(
+  question: Question,
+  solution: ModelSolution,
+  options: ValidateOptions = {},
+): ValidatedSolution {
   const checks: CheckResult[] = [];
   const answers: ModelSolution['answers'] = [];
   let corrected = false;
@@ -163,6 +213,9 @@ export function validateSolution(question: Question, solution: ModelSolution): V
       values: answer.values
         .map((v) => v.normalize('NFC'))
         .map((v) => (finalOnly ? toFinalAnswer(v) : v))
+        .map((v) =>
+          field.kind === 'text' ? dropRepeatedNeighbors(question.prompt, field.key, v) : v,
+        )
         .filter((v) => v.trim() !== ''),
     });
   }
@@ -284,6 +337,41 @@ export function validateSolution(question: Question, solution: ModelSolution): V
         status: 'pass',
         detail: `${entry.values[0]} has ${decimals}`,
       });
+    }
+  }
+
+  const list = wordListIn(options.instructions ?? '');
+  for (const entry of answers) {
+    const field = question.fields.find((f) => f.key === entry.fieldKey);
+    const value = entry.values[0]?.trim().toLocaleLowerCase();
+    if (!field || field.kind !== 'text' || !value) continue;
+    const hint = hintAfter(question.prompt, field.key)?.toLocaleLowerCase();
+    if (value === hint || list.includes(value)) {
+      checks.push({
+        name: 'Answer fits the sentence',
+        status: 'fail',
+        detail: `"${entry.values[0]}" is copied unchanged from the page. Use the form the sentence needs, for ${field.key}.`,
+      });
+    }
+  }
+
+  if (options.uniqueChoices) {
+    const seen = new Map<string, string>();
+    for (const entry of answers) {
+      const value = entry.values[0];
+      if (value === undefined) continue;
+      const earlier = seen.get(value);
+      if (earlier) {
+        const field = question.fields.find((f) => f.key === entry.fieldKey);
+        const label = field?.options.find((o) => o.id === value)?.label ?? value;
+        checks.push({
+          name: 'Each choice used once',
+          status: 'fail',
+          detail: `"${label}" is used for both ${earlier} and ${entry.fieldKey}. Each choice fits one item.`,
+        });
+      } else {
+        seen.set(value, entry.fieldKey);
+      }
     }
   }
 

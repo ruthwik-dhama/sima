@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
-import { LoaderCircle, ShieldAlert, Sparkles, Zap } from 'lucide-react';
-import type { PageAnalysis, ProviderId, Settings, Task, TaskView } from '@sima/shared-types';
+import { FileDown, LoaderCircle, ShieldAlert, Sparkles, Zap } from 'lucide-react';
+import type {
+  CaptureResult,
+  PageAnalysis,
+  ProviderId,
+  Settings,
+  Task,
+  TaskView,
+} from '@sima/shared-types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AgeGate } from '@/components/AgeGate';
 import { Button } from '@/components/ui/button';
 import { sendCommand } from '@/services/messaging';
 import { openSettings } from '@/services/open-settings';
@@ -47,16 +55,23 @@ export function Disclosure({
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
   if (!settings) return null;
+  if (settings.ageCheck === 'unset') return <AgeGate onDone={() => void load()} />;
   const id = settings.activeProvider;
   const provider = providers[id];
   if (!settings.models[id]) {
     return (
       <Alert data-testid="model-missing">
-        <AlertTitle>Choose an AI model to get started</AlertTitle>
+        <AlertTitle>
+          {id === 'gemini' ? 'Turn on free AI' : 'Choose an AI model to get started'}
+        </AlertTitle>
         <AlertDescription>
-          <p>Sima needs a model for {provider.name} before it can work through questions.</p>
+          <p>
+            {id === 'gemini'
+              ? 'It takes about a minute, and no payment is needed.'
+              : `Sima needs a model for ${provider.name} before it can work through questions.`}
+          </p>
           <Button size="sm" className="mt-2" data-testid="open-settings" onClick={openSettings}>
-            Open settings
+            {id === 'gemini' ? 'Set up Gemini' : 'Open settings'}
           </Button>
         </AlertDescription>
       </Alert>
@@ -71,6 +86,13 @@ export function Disclosure({
           When you ask Sima to work through a question, its text, tables and image descriptions are
           sent to {provider.origin} using your API key. Their data policy applies.
         </p>
+        {id === 'gemini' && (
+          <p className="mt-1" data-testid="gemini-terms">
+            On Gemini's free tier, Google may use what's sent to improve its products, and human
+            reviewers may read it, so don't send personal information. It's only for people 18 or
+            older, and isn't available in the EEA, Switzerland or the UK.
+          </p>
+        )}
         <Button
           size="sm"
           className="mt-2"
@@ -78,10 +100,61 @@ export function Disclosure({
             void sendCommand({ type: 'ACKNOWLEDGE_PROVIDER', provider: id }).then(load)
           }
         >
-          I understand
+          {id === 'gemini' ? "I understand, and I'm not in those regions" : 'I understand'}
         </Button>
       </AlertDescription>
     </Alert>
+  );
+}
+
+/** Offered where Sima can't read a supported site's page, which is when a capture is needed. */
+export function CaptureLayout({ tabId }: { tabId: number }) {
+  const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const result = await sendCommand<CaptureResult>({ type: 'CAPTURE_PAGE', tabId });
+      if (result.status === 'refused') {
+        setMessage(result.reason);
+        return;
+      }
+      const { capture } = result;
+      const blob = new Blob([JSON.stringify(capture, null, 1)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `sima-page-${capture.platformId}-${capture.capturedOn}.json`;
+      link.click();
+      setMessage('Saved to your Downloads. Check it before sharing it.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not capture this page.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2" data-testid="capture-layout">
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="capture-page"
+        disabled={saving}
+        onClick={() => void save()}
+      >
+        <FileDown /> Save page layout
+      </Button>
+      <p className="text-xs text-muted-foreground">
+        Saves how this page is built, without its questions, answers or names, so support for it can
+        be added.
+      </p>
+      {message && (
+        <p className="text-xs font-medium text-foreground" data-testid="capture-message">
+          {message}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -122,7 +195,11 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
           }}
         >
           {filling || working ? <LoaderCircle className={iconClass} /> : <Zap />}
-          {working ? 'Working…' : filling ? 'Filling…' : 'Fill answers'}
+          <span data-testid="fill-label">
+            {filling || working
+              ? (task.activityNote ?? (working ? 'Working…' : 'Filling…'))
+              : 'Fill answers'}
+          </span>
         </Button>
         <Button
           className="h-9 rounded-lg"
@@ -132,7 +209,7 @@ export function Controls({ view, task }: { view: TaskView; task: Task }) {
           onClick={() => void start('explain')}
         >
           {explaining ? <LoaderCircle className={iconClass} /> : <Sparkles />}
-          {explaining ? 'Explaining…' : 'Explain only'}
+          {explaining ? (task.activityNote ?? 'Explaining…') : 'Explain only'}
         </Button>
       </div>
       {asking && (
