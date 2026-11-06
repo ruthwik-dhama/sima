@@ -23,14 +23,14 @@
   <img alt="Node 22+" src="https://img.shields.io/badge/Node-22%2B-black?style=flat-square">
 </p>
 
-Sima is an open-source Chrome extension that helps you understand learning activities. It reads the questions on a supported page, works through them with an AI model running on your own computer, and explains its reasoning. It needs no account or API key, and question text never leaves your computer. If your course allows it, Sima can also enter the answers for you to check before you submit.
+Sima is an open-source Chrome extension that helps you automate your boring assignments. Sima reads the questions on a supported page, works through them with an AI model running on your own computer, and enters the answers for you to check before you submit. It also explains its reasoning if it is asked.
 
 **Status: early development.** VHL Central now handles real activities, but it has only been tried on a few. Gradescope and WebAssign have only been tested against local mock pages. See [Known limitations](#known-limitations).
 
 ## What Sima won't do
 
-- **It never submits work.** Saving and submitting are always yours to do.
-- **It stays off on exams and quizzes.** It also stays off on proctored or timed activities, and on activities that say AI isn't allowed. There's no override.
+- **It never submits work.** Sima finds the answers and enters them for you, but submitting and saving is yours to do.
+- **It stays off on exams and quizzes.** It is meant for Homework assignments so it stays off activities that say AI isn't allowed.
 - **It doesn't enter anything unasked.** The first time you click **Fill answers** on an activity, Sima asks you to confirm that AI help is allowed there. Your answer lasts for that whole activity.
 
 You're responsible for following your course's academic integrity policy. If you're unsure whether AI help is allowed, ask your instructor first.
