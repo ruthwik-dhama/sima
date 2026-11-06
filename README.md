@@ -4,7 +4,7 @@
 
 <h1 align="center">Sima</h1>
 
-<h3 align="center">Your AI learning assistant in Chrome</h3>
+<h3 align="center">Your AI Assignment Automator in Chrome</h3>
 
 <p align="center">
   <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-black?style=flat-square"></a>
